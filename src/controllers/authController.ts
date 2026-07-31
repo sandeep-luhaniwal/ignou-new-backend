@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs"
 import generateToken from "../utils/generateToken"
 import { AuthRequest } from "../middleware/authMiddleware";
 import { sendEmail } from "../utils/sendEmail"
+import { generateOtpEmailHtml } from "../utils/emailTemplates"
 
 export const signup = async (req: Request, res: Response) => {
     try {
@@ -35,12 +36,8 @@ export const signup = async (req: Request, res: Response) => {
         // Send Registration OTP via Email
         await sendEmail({
             to: email,
-            subject: "IGNOU Portal - Account Verification OTP",
-            html: `
-                <h3>Hello ${name},</h3>
-                <p>Thank you for registering at IGNOU Portal. Your one-time password (OTP) for account verification is <b>${otp}</b>.</p>
-                <p>This OTP is valid for 5 minutes. Please do not share it with anyone.</p>
-            `
+            subject: "IGNOUPower - Account Verification OTP",
+            html: generateOtpEmailHtml({ name, otp, type: "verification" })
         })
 
         res.json({
@@ -249,13 +246,8 @@ export const forgotPassword = async (req: Request, res: Response) => {
         // Send OTP email
         await sendEmail({
             to: user.email,
-            subject: "IGNOU Portal - Password Reset OTP",
-            html: `
-                <h3>Hello ${user.name},</h3>
-                <p>You requested to reset your password.</p>
-                <p>Your one-time password (OTP) for password reset is <b>${otp}</b>.</p>
-                <p>This OTP is valid for 5 minutes.</p>
-            `
+            subject: "IGNOUPower - Password Reset OTP",
+            html: generateOtpEmailHtml({ name: user.name, otp, type: "reset" })
         })
 
         res.json({ message: "OTP sent to email for password reset" })

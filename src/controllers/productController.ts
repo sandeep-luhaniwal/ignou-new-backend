@@ -3,6 +3,7 @@ import mongoose from "mongoose"
 import Product from "../models/Product"
 import Category from "../models/Category"
 import { getPagination } from "../utils/apiFeatures"
+import { uploadToCloudinary } from "../utils/cloudinary"
 
 export const createProduct = async (req: Request, res: Response) => {
   try {
@@ -12,7 +13,10 @@ export const createProduct = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Category is required" })
     }
 
-    const image = req.file ? `http://localhost:5000/uploads/${req.file.filename}` : ""
+    let image = ""
+    if (req.file) {
+      image = await uploadToCloudinary(req.file.buffer)
+    }
     const product = await Product.create({
       title,
       price,
@@ -146,7 +150,10 @@ export const updateProduct = async (req: Request, res: Response) => {
     if (!product) {
       return res.status(404).json({ message: "Product not found" });
     }
-    const image = req.file ? `http://localhost:5000/uploads/${req.file.filename}` : product.image
+    let image = product.image
+    if (req.file) {
+      image = await uploadToCloudinary(req.file.buffer)
+    }
     product.title = title || product.title
     product.price = price || product.price
     product.oldPrice = oldPrice !== undefined ? oldPrice : product.oldPrice
