@@ -19,7 +19,7 @@ router.get("/:id", getSingleProduct)
 
 router.post("/", protect, adminOnly, upload.single("image"), createProduct)
 
-router.put("/:id", protect, adminOnly, updateProduct)
+router.put("/:id", protect, adminOnly, upload.single("image"), updateProduct)
 
 router.delete("/:id", protect, adminOnly, deleteProduct)
 

@@ -23,3 +23,13 @@ export const createQuery = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Error creating inquiry" })
   }
 }
+
+export const getQueries = async (req: Request, res: Response) => {
+  try {
+    const queries = await Query.find().sort({ createdAt: -1 })
+    res.json(queries)
+  } catch (error) {
+    console.error("GET QUERIES ERROR:", error)
+    res.status(500).json({ message: "Error fetching inquiries" })
+  }
+}
