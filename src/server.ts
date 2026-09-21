@@ -12,6 +12,7 @@ import orderRoutes from "./routes/orderRoutes"
 import queryRoutes from "./routes/queryRoutes"
 import noticeRoutes from "./routes/noticeRoutes"
 import adminRoutes from "./routes/adminRoutes"
+import paymentRoutes from "./routes/paymentRoutes"
 
 dotenv.config()
 
@@ -92,6 +93,8 @@ app.use("/api/orders", orderRoutes)
 app.use("/api/queries", queryRoutes)
 app.use("/api/notices", noticeRoutes)
 app.use("/api/admin", adminRoutes)
+app.use("/api/payments", paymentRoutes)
+app.use("/api/payment-history", paymentRoutes)
 
 // 404 handler
 app.use((req: Request, res: Response) => {

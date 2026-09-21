@@ -4,6 +4,7 @@ import {
     getOrders, 
     getOrderById, 
     verifyPayment,
+    downloadOrderItem,
     getAllOrdersAdmin,
     updateOrderStatusAdmin,
     deleteOrderAdmin
@@ -19,6 +20,7 @@ router.post("/verify", protect, verifyPayment)
 router.get("/my-orders", protect, getOrders)
 router.get("/", protect, getOrders)
 router.get("/:id", protect, getOrderById)
+router.get("/:id/download/:itemId", protect, downloadOrderItem)
 
 // Admin routes
 router.get("/admin/all", protect, adminOnly, getAllOrdersAdmin)

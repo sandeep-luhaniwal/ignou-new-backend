@@ -1,6 +1,9 @@
+import mongoose from "mongoose"
 import { Response } from "express"
 import { AuthRequest } from "../middleware/authMiddleware"
 import Order from "../models/Order"
+import Product from "../models/Product"
+import User from "../models/User"
 import Razorpay from "razorpay"
 import crypto from "crypto"
 
@@ -20,18 +23,36 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
   try {
     const { items, deliveryType, shippingAddress, subtotal, shippingFee, discount, grandTotal } = req.body
 
-    if (!items || items.length === 0) {
+    if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "No items in order" })
     }
 
-    const orderItems = items.map((item: any) => ({
-      product: item.id || item.product || item._id,
-      code: item.code || "",
-      title: item.title || "",
-      price: Number(item.price),
-      quantity: Number(item.quantity) || 1,
-      fileUrl: item.fileUrl || ""
-    }))
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ message: "User not authenticated" })
+    }
+
+    const orderItems = await Promise.all(
+      items.map(async (item: any) => {
+        const productId = item.id || item.product || item._id
+        let productDoc: any = null
+        if (productId && mongoose.Types.ObjectId.isValid(productId)) {
+          try {
+            productDoc = await Product.findById(productId)
+          } catch (e) {
+            console.error("Error looking up product:", e)
+          }
+        }
+
+        return {
+          product: productId,
+          code: item.code || productDoc?.code || "N/A",
+          title: item.title || productDoc?.title || item.code || "Item",
+          price: Number(item.price) || productDoc?.price || 0,
+          quantity: Number(item.quantity) || 1,
+          fileUrl: item.fileUrl || productDoc?.fileUrl || ""
+        }
+      })
+    )
 
     // 1. Create order in MongoDB (with default paymentStatus: "Pending")
     const order = await Order.create({
@@ -39,43 +60,58 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       items: orderItems,
       deliveryType: deliveryType || "PDF",
       shippingAddress,
-      subtotal: Number(subtotal),
+      subtotal: Number(subtotal) || 0,
       shippingFee: Number(shippingFee) || 0,
       discount: Number(discount) || 0,
-      grandTotal: Number(grandTotal),
+      grandTotal: Number(grandTotal) || 0,
       paymentStatus: "Pending",
       orderStatus: "Processing"
     })
 
     // 2. Create Razorpay order
-    const amountInPaise = Math.round(Number(grandTotal) * 100)
-    const options = {
-      amount: amountInPaise,
-      currency: "INR",
-      receipt: `receipt_order_${order._id}`
-    }
-
+    const amountInPaise = Math.round(Number(grandTotal || subtotal || 0) * 100)
     let razorpayOrder = null
-    try {
-      const razorpay = getRazorpay()
-      razorpayOrder = await razorpay.orders.create(options)
-      order.razorpayOrderId = razorpayOrder.id
-      await order.save()
-    } catch (rzpErr) {
-      console.error("Razorpay order creation warning:", rzpErr)
+    if (amountInPaise > 0) {
+      const options = {
+        amount: amountInPaise,
+        currency: "INR",
+        receipt: `receipt_order_${order._id}`
+      }
+
+      try {
+        const razorpay = getRazorpay()
+        razorpayOrder = await razorpay.orders.create(options)
+        order.razorpayOrderId = razorpayOrder.id
+        await order.save()
+      } catch (rzpErr) {
+        console.error("Razorpay order creation warning:", rzpErr)
+      }
     }
 
     const populatedOrder = await Order.findById(order._id)
       .populate("user", "name email phone enrolmentNo")
-      .populate("items.product", "title code image fileUrl")
+      .populate("items.product", "title code image")
+
+    // Before payment is confirmed, do not expose fileUrl in createOrder response
+    const sanitizedOrder = populatedOrder?.toObject()
+    if (sanitizedOrder && sanitizedOrder.paymentStatus !== "Paid") {
+      sanitizedOrder.items = sanitizedOrder.items.map((i: any) => ({
+        ...i,
+        fileUrl: undefined,
+        product: i.product ? { ...i.product, fileUrl: undefined } : undefined
+      }))
+    }
 
     res.status(201).json({
-      order: populatedOrder,
+      order: sanitizedOrder,
       razorpayOrder
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error("CREATE ORDER ERROR:", error)
-    res.status(500).json({ message: "Error creating order" })
+    res.status(500).json({ 
+      message: "Error creating order",
+      error: error?.message || "Internal server error"
+    })
   }
 }
 
@@ -92,8 +128,21 @@ export const getOrders = async (req: AuthRequest, res: Response) => {
       .limit(limit)
       .sort({ createdAt: -1 })
 
+    // Hide fileUrl for unpaid orders
+    const sanitizedOrders = orders.map((orderDoc) => {
+      const orderObj = orderDoc.toObject()
+      if (orderObj.paymentStatus !== "Paid") {
+        orderObj.items = orderObj.items.map((i: any) => ({
+          ...i,
+          fileUrl: undefined,
+          product: i.product ? { ...i.product, fileUrl: undefined } : undefined
+        }))
+      }
+      return orderObj
+    })
+
     res.json({
-      data: orders,
+      data: sanitizedOrders,
       pagination: {
         total,
         page,
@@ -122,7 +171,17 @@ export const getOrderById = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: "Not authorized" })
     }
 
-    res.json(order)
+    const orderObj = order.toObject()
+    // If not paid and not admin, hide fileUrl
+    if (orderObj.paymentStatus !== "Paid" && req.user.role !== "admin") {
+      orderObj.items = orderObj.items.map((i: any) => ({
+        ...i,
+        fileUrl: undefined,
+        product: i.product ? { ...i.product, fileUrl: undefined } : undefined
+      }))
+    }
+
+    res.json(orderObj)
   } catch (error) {
     console.error("GET ORDER BY ID ERROR:", error)
     res.status(500).json({ message: "Error fetching order" })
@@ -137,6 +196,10 @@ export const verifyPayment = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: "Missing payment verification parameters" })
     }
 
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ message: "User not authenticated" })
+    }
+
     const secretKey = process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET || ""
     const sign = razorpay_order_id + "|" + razorpay_payment_id
     const expectedSign = crypto
@@ -144,34 +207,110 @@ export const verifyPayment = async (req: AuthRequest, res: Response) => {
       .update(sign.toString())
       .digest("hex")
 
-    if (razorpay_signature === expectedSign) {
-      const order = await Order.findOneAndUpdate(
-        { razorpayOrderId: razorpay_order_id },
-        {
-          paymentStatus: "Paid",
-          orderStatus: "Completed",
-          razorpayPaymentId: razorpay_payment_id,
-          razorpaySignature: razorpay_signature
-        },
-        { new: true }
-      )
-        .populate("user", "name email")
-        .populate("items.product", "title code fileUrl")
-
-      if (!order) {
-        return res.status(404).json({ message: "Order not found for verification" })
-      }
-
-      res.status(200).json({
-        message: "Payment verified successfully",
-        order
-      })
-    } else {
-      res.status(400).json({ message: "Invalid signature, verification failed" })
+    if (razorpay_signature !== expectedSign) {
+      return res.status(400).json({ message: "Invalid payment signature, verification failed" })
     }
-  } catch (error) {
+
+    // Securely update the order belonging to THIS authenticated user
+    const order = await Order.findOneAndUpdate(
+      { razorpayOrderId: razorpay_order_id, user: req.user._id },
+      {
+        paymentStatus: "Paid",
+        orderStatus: "Completed",
+        razorpayPaymentId: razorpay_payment_id,
+        razorpaySignature: razorpay_signature
+      },
+      { new: true }
+    )
+      .populate("user", "name email phone")
+      .populate("items.product", "title code image fileUrl")
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found or does not belong to this user" })
+    }
+
+    // Provide immediate list of downloadable purchased files
+    const purchasedFiles = order.items.map((item: any) => ({
+      itemId: item._id,
+      productId: item.product?._id || item.product,
+      code: item.code || item.product?.code || "N/A",
+      title: item.title || item.product?.title || "Product",
+      fileUrl: item.fileUrl || item.product?.fileUrl || "",
+      price: item.price,
+      quantity: item.quantity
+    }))
+
+    res.status(200).json({
+      success: true,
+      message: "Payment verified successfully",
+      order,
+      downloads: purchasedFiles
+    })
+  } catch (error: any) {
     console.error("VERIFY PAYMENT ERROR:", error)
-    res.status(500).json({ message: "Error verifying payment" })
+    res.status(500).json({ 
+      message: "Error verifying payment",
+      error: error?.message || "Internal server error"
+    })
+  }
+}
+
+export const downloadOrderItem = async (req: AuthRequest, res: Response) => {
+  try {
+    const orderId = String(req.params.id)
+    const itemId = String(req.params.itemId)
+
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ message: "User not authenticated" })
+    }
+
+    const order = await Order.findById(orderId)
+      .populate("items.product", "title code fileUrl")
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    // 1. Verify user ownership
+    if (order.user.toString() !== req.user._id.toString() && req.user.role !== "admin") {
+      return res.status(403).json({ message: "Not authorized to access this order" })
+    }
+
+    // 2. Verify payment status
+    if (order.paymentStatus !== "Paid") {
+      return res.status(403).json({ 
+        message: "Payment not completed for this order. Please complete payment to download files." 
+      })
+    }
+
+    // 3. Find requested item by item ID, product ID, or course code
+    const item = order.items.find((i: any) => 
+      i._id?.toString() === itemId || 
+      (i.product && (i.product._id?.toString() === itemId || i.product.toString() === itemId)) ||
+      (i.code && i.code.toLowerCase() === itemId.toLowerCase())
+    )
+
+    if (!item) {
+      return res.status(404).json({ message: "Item not found in your purchased order" })
+    }
+
+    const downloadUrl = item.fileUrl || (item.product as any)?.fileUrl
+    if (!downloadUrl) {
+      return res.status(404).json({ message: "PDF file is not uploaded or available for this product yet" })
+    }
+
+    res.json({
+      success: true,
+      title: item.title || (item.product as any)?.title,
+      code: item.code || (item.product as any)?.code,
+      downloadUrl
+    })
+  } catch (error: any) {
+    console.error("DOWNLOAD ORDER ITEM ERROR:", error)
+    res.status(500).json({ 
+      message: "Error processing download request",
+      error: error?.message || "Internal server error"
+    })
   }
 }
 
@@ -181,19 +320,38 @@ export const getAllOrdersAdmin = async (req: AuthRequest, res: Response) => {
     const page = parseInt(req.query.page as string) || 1
     const limit = parseInt(req.query.limit as string) || 10
     const skip = (page - 1) * limit
-    const search = req.query.search as string
+    const search = (req.query.search as string || "").trim()
     const paymentStatus = req.query.paymentStatus as string
     const orderStatus = req.query.orderStatus as string
     const deliveryType = req.query.deliveryType as string
 
     const query: any = {}
-    if (paymentStatus) query.paymentStatus = paymentStatus
-    if (orderStatus) query.orderStatus = orderStatus
-    if (deliveryType) query.deliveryType = deliveryType
+    if (paymentStatus && paymentStatus !== "All") {
+      query.paymentStatus = paymentStatus
+    }
+    if (orderStatus && orderStatus !== "All") {
+      query.orderStatus = orderStatus
+    }
+    if (deliveryType && deliveryType !== "All") {
+      query.deliveryType = deliveryType
+    }
 
     if (search) {
       const searchRegex = new RegExp(search, "i")
+      
+      // Find matching user IDs
+      const matchedUsers = await User.find({
+        $or: [
+          { name: searchRegex },
+          { email: searchRegex },
+          { phone: searchRegex },
+          { enrolmentNo: searchRegex }
+        ]
+      }).select("_id")
+      const userIds = matchedUsers.map(u => u._id)
+
       query.$or = [
+        { user: { $in: userIds } },
         { "shippingAddress.name": searchRegex },
         { "shippingAddress.phone": searchRegex },
         { razorpayOrderId: searchRegex },
@@ -203,6 +361,7 @@ export const getAllOrdersAdmin = async (req: AuthRequest, res: Response) => {
       ]
     }
 
+    // 1. Fetch paginated orders
     const total = await Order.countDocuments(query)
     const orders = await Order.find(query)
       .populate("user", "name email phone enrolmentNo")
@@ -211,8 +370,30 @@ export const getAllOrdersAdmin = async (req: AuthRequest, res: Response) => {
       .limit(limit)
       .sort({ createdAt: -1 })
 
+    // 2. Fetch overall payment analytics summary
+    const [totalAll, paidAll, failedAll, pendingAll, revenueAgg] = await Promise.all([
+      Order.countDocuments(),
+      Order.countDocuments({ paymentStatus: "Paid" }),
+      Order.countDocuments({ paymentStatus: "Failed" }),
+      Order.countDocuments({ paymentStatus: "Pending" }),
+      Order.aggregate([
+        { $match: { paymentStatus: "Paid" } },
+        { $group: { _id: null, total: { $sum: "$grandTotal" } } }
+      ])
+    ])
+
+    const totalRevenue = revenueAgg.length > 0 ? revenueAgg[0].total : 0
+
     res.json({
+      success: true,
       data: orders,
+      summary: {
+        totalOrders: totalAll,
+        paidOrders: paidAll,
+        failedOrders: failedAll,
+        pendingOrders: pendingAll,
+        totalRevenue
+      },
       pagination: {
         total,
         page,
@@ -220,9 +401,12 @@ export const getAllOrdersAdmin = async (req: AuthRequest, res: Response) => {
         totalPages: Math.ceil(total / limit)
       }
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error("GET ALL ORDERS ADMIN ERROR:", error)
-    res.status(500).json({ message: "Error fetching orders for admin" })
+    res.status(500).json({ 
+      message: "Error fetching orders for admin",
+      error: error?.message || "Internal server error"
+    })
   }
 }
 

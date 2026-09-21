@@ -193,6 +193,7 @@ export const getProducts = async (req: Request, res: Response) => {
 
     const total = await Product.countDocuments(query);
     const products = await Product.find(query)
+      .select("-fileUrl")
       .populate("category", "name")
       .populate("subCategory", "name")
       .skip(skip)
@@ -217,6 +218,7 @@ export const getProducts = async (req: Request, res: Response) => {
 export const getFeaturedProducts = async (req: Request, res: Response) => {
   try {
     const products = await Product.find({ isFeatured: true })
+      .select("-fileUrl")
       .populate("category", "name")
       .populate("subCategory", "name")
       .limit(10)
@@ -321,6 +323,7 @@ export const updateProduct = async (req: Request, res: Response) => {
 export const getSingleProduct = async (req: Request, res: Response) => {
   try {
     const product = await Product.findById(req.params.id)
+      .select("-fileUrl")
       .populate("category", "name")
       .populate("subCategory", "name")
       

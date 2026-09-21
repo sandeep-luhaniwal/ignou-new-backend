@@ -53,19 +53,18 @@ const orderSchema = new Schema<IOrder>(
         },
         code: {
           type: String,
-          required: true
+          default: ""
         },
         title: {
           type: String,
-          required: true
+          default: ""
         },
         price: {
           type: Number,
-          required: true
+          default: 0
         },
         quantity: {
           type: Number,
-          required: true,
           default: 1
         },
         fileUrl: {
@@ -77,7 +76,7 @@ const orderSchema = new Schema<IOrder>(
     deliveryType: {
       type: String,
       enum: ["PDF", "Handwritten"],
-      required: true
+      default: "PDF"
     },
     shippingAddress: {
       name: String,
@@ -89,21 +88,19 @@ const orderSchema = new Schema<IOrder>(
     },
     subtotal: {
       type: Number,
-      required: true
+      default: 0
     },
     shippingFee: {
       type: Number,
-      required: true,
       default: 0
     },
     discount: {
       type: Number,
-      required: true,
       default: 0
     },
     grandTotal: {
       type: Number,
-      required: true
+      default: 0
     },
     paymentStatus: {
       type: String,
