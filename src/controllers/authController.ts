@@ -131,11 +131,132 @@ export const login = async (req: Request, res: Response) => {
 
 export const getUsers = async (req: Request, res: Response) => {
     try {
-        const user = await User.find({ role: "user" }).select("-password")
-        res.json({ data: user })
+        const page = parseInt(req.query.page as string) || 1
+        const limit = parseInt(req.query.limit as string) || 10
+        const skip = (page - 1) * limit
+        const search = req.query.search as string
+        const role = req.query.role as string
 
+        const query: any = {}
+        if (role) {
+            query.role = role
+        }
+        if (search) {
+            const searchRegex = new RegExp(search, "i")
+            query.$or = [
+                { name: searchRegex },
+                { email: searchRegex },
+                { enrolmentNo: searchRegex },
+                { program: searchRegex }
+            ]
+        }
+
+        const total = await User.countDocuments(query)
+        const users = await User.find(query)
+            .select("-password -otp -otpExpiry")
+            .skip(skip)
+            .limit(limit)
+            .sort({ createdAt: -1 })
+
+        res.json({
+            data: users,
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit)
+            }
+        })
     } catch (error) {
+        console.error("GET USERS ERROR:", error)
         return res.status(500).json({ message: "Error fetching users" })
+    }
+}
+
+export const getUserById = async (req: Request, res: Response) => {
+    try {
+        const user = await User.findById(req.params.id).select("-password -otp -otpExpiry")
+        if (!user) {
+            return res.status(404).json({ message: "User not found" })
+        }
+        res.json(user)
+    } catch (error) {
+        console.error("GET USER BY ID ERROR:", error)
+        return res.status(500).json({ message: "Error fetching user" })
+    }
+}
+
+export const updateUserByAdmin = async (req: Request, res: Response) => {
+    try {
+        const { name, email, role, enrolmentNo, program, session } = req.body
+        const user = await User.findById(req.params.id)
+        if (!user) {
+            return res.status(404).json({ message: "User not found" })
+        }
+
+        if (name) user.name = name
+        if (email) user.email = email
+        if (role) user.role = role
+        if (enrolmentNo !== undefined) user.enrolmentNo = enrolmentNo
+        if (program !== undefined) user.program = program
+        if (session !== undefined) user.session = session
+
+        await user.save()
+        res.json({
+            message: "User updated successfully",
+            user: {
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                enrolmentNo: user.enrolmentNo,
+                program: user.program,
+                session: user.session
+            }
+        })
+    } catch (error) {
+        console.error("UPDATE USER BY ADMIN ERROR:", error)
+        return res.status(500).json({ message: "Error updating user" })
+    }
+}
+
+export const deleteUser = async (req: Request, res: Response) => {
+    try {
+        const user = await User.findByIdAndDelete(req.params.id)
+        if (!user) {
+            return res.status(404).json({ message: "User not found" })
+        }
+        res.json({ message: "User deleted successfully" })
+    } catch (error) {
+        console.error("DELETE USER ERROR:", error)
+        return res.status(500).json({ message: "Error deleting user" })
+    }
+}
+
+export const changePassword = async (req: AuthRequest, res: Response) => {
+    try {
+        const { oldPassword, newPassword } = req.body
+        if (!oldPassword || !newPassword) {
+            return res.status(400).json({ message: "Old password and new password are required" })
+        }
+
+        const user = await User.findById(req.user._id)
+        if (!user) {
+            return res.status(404).json({ message: "User not found" })
+        }
+
+        const isMatch = await bcrypt.compare(oldPassword, user.password)
+        if (!isMatch) {
+            return res.status(400).json({ message: "Incorrect current password" })
+        }
+
+        user.password = await bcrypt.hash(newPassword, 10)
+        await user.save()
+
+        res.json({ message: "Password updated successfully" })
+    } catch (error) {
+        console.error("CHANGE PASSWORD ERROR:", error)
+        return res.status(500).json({ message: "Error changing password" })
     }
 }
 

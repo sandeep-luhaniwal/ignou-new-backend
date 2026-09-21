@@ -6,10 +6,13 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 })
 
-export const uploadToCloudinary = (fileBuffer: Buffer): Promise<string> => {
+export const uploadToCloudinary = (fileBuffer: Buffer, folder: string = "ignoupower"): Promise<string> => {
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
-      { folder: "ignoupower" },
+      { 
+        folder,
+        resource_type: "auto"
+      },
       (error, result) => {
         if (error) {
           console.error("Cloudinary upload error:", error);

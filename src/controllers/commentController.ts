@@ -1,5 +1,5 @@
 import Comment from "../models/commentModel"
-import { Response } from "express"
+import { Request, Response } from "express"
 import { io } from "../server"
 import { AuthRequest } from "../middleware/authMiddleware"
 
@@ -27,13 +27,30 @@ export const createComment = async (req: AuthRequest, res: Response) => {
     }
 }
 
-export const getComments = async (req: AuthRequest, res: Response) => {
+export const getComments = async (req: Request | AuthRequest, res: Response) => {
     try {
         const { productId } = req.params
-        const comments = await Comment.find({ product: productId })
+        const page = parseInt(req.query.page as string) || 1
+        const limit = parseInt(req.query.limit as string) || 10
+        const skip = (page - 1) * limit
+
+        const query = { product: productId }
+        const total = await Comment.countDocuments(query)
+        const comments = await Comment.find(query)
             .populate("user", "name email")
+            .skip(skip)
+            .limit(limit)
             .sort({ createdAt: -1 })
-        res.json(comments)
+
+        res.json({
+            data: comments,
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit)
+            }
+        })
     } catch (error) {
         console.log("GET COMMENTS ERROR:", error)
         res.status(500).json({ message: "Error fetching comments" })

@@ -21,7 +21,8 @@ required:true
 
 role:{
 type:String,
-enum:["admin","client"],
+enum:["admin","user","client"],
+default: "user",
 required:true
 }
 

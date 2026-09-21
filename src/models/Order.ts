@@ -6,6 +6,7 @@ export interface IOrderItem {
   title: string
   price: number
   quantity: number
+  fileUrl?: string
 }
 
 export interface IOrder extends Document {
@@ -17,15 +18,21 @@ export interface IOrder extends Document {
     phone: string
     address: string
     pincode: string
+    city?: string
+    state?: string
   }
   subtotal: number
   shippingFee: number
   discount: number
   grandTotal: number
   paymentStatus: "Pending" | "Paid" | "Failed"
+  orderStatus: "Processing" | "Dispatched" | "Delivered" | "Completed" | "Cancelled"
   razorpayOrderId?: string
   razorpayPaymentId?: string
   razorpaySignature?: string
+  trackingNumber?: string
+  courierName?: string
+  adminNotes?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -60,6 +67,10 @@ const orderSchema = new Schema<IOrder>(
           type: Number,
           required: true,
           default: 1
+        },
+        fileUrl: {
+          type: String,
+          default: ""
         }
       }
     ],
@@ -72,7 +83,9 @@ const orderSchema = new Schema<IOrder>(
       name: String,
       phone: String,
       address: String,
-      pincode: String
+      pincode: String,
+      city: String,
+      state: String
     },
     subtotal: {
       type: Number,
@@ -97,6 +110,11 @@ const orderSchema = new Schema<IOrder>(
       enum: ["Pending", "Paid", "Failed"],
       default: "Pending"
     },
+    orderStatus: {
+      type: String,
+      enum: ["Processing", "Dispatched", "Delivered", "Completed", "Cancelled"],
+      default: "Processing"
+    },
     razorpayOrderId: {
       type: String
     },
@@ -105,6 +123,18 @@ const orderSchema = new Schema<IOrder>(
     },
     razorpaySignature: {
       type: String
+    },
+    trackingNumber: {
+      type: String,
+      default: ""
+    },
+    courierName: {
+      type: String,
+      default: ""
+    },
+    adminNotes: {
+      type: String,
+      default: ""
     }
   },
   { timestamps: true }

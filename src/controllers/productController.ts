@@ -7,32 +7,74 @@ import { uploadToCloudinary } from "../utils/cloudinary"
 
 export const createProduct = async (req: Request, res: Response) => {
   try {
-    const { title, price, oldPrice, description, category, subCategory, code, year, rating, reviews } = req.body
+    const { 
+      title, 
+      price, 
+      oldPrice, 
+      description, 
+      category, 
+      subCategory, 
+      code, 
+      year, 
+      session,
+      semester,
+      program,
+      productType,
+      rating, 
+      reviews,
+      isFeatured,
+      inStock,
+      fileUrl: bodyFileUrl
+    } = req.body
 
     if (!category) {
       return res.status(400).json({ message: "Category is required" })
     }
 
     let image = ""
-    if (req.file) {
-      image = await uploadToCloudinary(req.file.buffer)
+    let fileUrl = bodyFileUrl || ""
+
+    // Check if files are uploaded via multer (single or fields)
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined
+    if (files) {
+      if (files["image"] && files["image"][0]) {
+        image = await uploadToCloudinary(files["image"][0].buffer, "ignoupower/images")
+      }
+      if (files["file"] && files["file"][0]) {
+        fileUrl = await uploadToCloudinary(files["file"][0].buffer, "ignoupower/files")
+      }
+    } else if (req.file) {
+      image = await uploadToCloudinary(req.file.buffer, "ignoupower/images")
     }
+
     const product = await Product.create({
       title,
-      price,
-      oldPrice,
+      price: Number(price),
+      oldPrice: oldPrice ? Number(oldPrice) : 0,
       description,
       image,
+      fileUrl,
       category,
-      subCategory,
-      code,
+      subCategory: subCategory || undefined,
+      code: code ? code.toUpperCase() : "",
       year,
-      rating,
-      reviews
+      session,
+      semester,
+      program: program ? program.toUpperCase() : "",
+      productType: productType || "assignment",
+      rating: rating ? Number(rating) : 5,
+      reviews: reviews ? Number(reviews) : 0,
+      isFeatured: isFeatured === true || isFeatured === "true",
+      inStock: inStock === undefined || inStock === true || inStock === "true"
     })
-    res.json(product)
+
+    const populatedProduct = await Product.findById(product._id)
+      .populate("category", "name")
+      .populate("subCategory", "name")
+
+    res.status(201).json(populatedProduct)
   } catch (error) {
-    console.log("CREATE PRODUCT ERROR:", error)
+    console.error("CREATE PRODUCT ERROR:", error)
     res.status(500).json({ message: "Error creating product" })
   }
 }
@@ -42,13 +84,14 @@ export const getProducts = async (req: Request, res: Response) => {
     const { page, limit, skip } = getPagination(req.query);
     const query: any = {};
 
-    // 1. Search Query (on title, description, or code)
+    // 1. Search Query (title, description, code, or program)
     if (req.query.search) {
       const searchRegex = new RegExp(req.query.search as string, "i");
       query.$or = [
         { title: searchRegex },
         { description: searchRegex },
-        { code: searchRegex }
+        { code: searchRegex },
+        { program: searchRegex }
       ];
     }
 
@@ -60,7 +103,6 @@ export const getProducts = async (req: Request, res: Response) => {
         .filter(Boolean);
 
       if (categoryList.length > 0) {
-        // Try finding category IDs by name first (case-insensitive) or by direct ID
         const categories = await Category.find({
           $or: [
             { name: { $in: categoryList.map(name => new RegExp(`^${name}$`, "i")) } },
@@ -72,7 +114,19 @@ export const getProducts = async (req: Request, res: Response) => {
       }
     }
 
-    // 3. Year filter (comma-separated, e.g., "2024-25,2025-26")
+    // 3. SubCategory filter
+    if (req.query.subCategory) {
+      if (mongoose.Types.ObjectId.isValid(req.query.subCategory as string)) {
+        query.subCategory = req.query.subCategory;
+      } else {
+        const subCat = await Category.findOne({ name: new RegExp(`^${req.query.subCategory}$`, "i") });
+        if (subCat) {
+          query.subCategory = subCat._id;
+        }
+      }
+    }
+
+    // 4. Year filter
     if (req.query.year) {
       const years = (req.query.year as string)
         .split(",")
@@ -83,7 +137,33 @@ export const getProducts = async (req: Request, res: Response) => {
       }
     }
 
-    // 4. Price range filters
+    // 5. Program filter (BCA, MCA, MBA, etc.)
+    if (req.query.program) {
+      const programs = (req.query.program as string)
+        .split(",")
+        .map(p => new RegExp(`^${p.trim()}$`, "i"))
+        .filter(Boolean);
+      if (programs.length > 0) {
+        query.program = { $in: programs };
+      }
+    }
+
+    // 6. Semester filter
+    if (req.query.semester) {
+      query.semester = new RegExp(req.query.semester as string, "i");
+    }
+
+    // 7. Product Type filter
+    if (req.query.productType) {
+      query.productType = req.query.productType;
+    }
+
+    // 8. Featured filter
+    if (req.query.isFeatured !== undefined) {
+      query.isFeatured = req.query.isFeatured === "true";
+    }
+
+    // 9. Price range filters
     if (req.query.minPrice || req.query.maxPrice) {
       query.price = {};
       if (req.query.minPrice) {
@@ -94,16 +174,18 @@ export const getProducts = async (req: Request, res: Response) => {
       }
     }
 
-    // 5. Sorting
+    // 10. Sorting
     let sort: any = { createdAt: -1 };
     if (req.query.sortBy) {
       const sortBy = req.query.sortBy as string;
-      if (sortBy === "priceAsc") {
+      if (sortBy === "priceAsc" || sortBy === "price_low") {
         sort = { price: 1 };
-      } else if (sortBy === "priceDesc") {
+      } else if (sortBy === "priceDesc" || sortBy === "price_high") {
         sort = { price: -1 };
       } else if (sortBy === "rating") {
         sort = { rating: -1 };
+      } else if (sortBy === "popular") {
+        sort = { reviews: -1 };
       } else if (sortBy === "newest") {
         sort = { createdAt: -1 };
       }
@@ -132,55 +214,122 @@ export const getProducts = async (req: Request, res: Response) => {
   }
 }
 
+export const getFeaturedProducts = async (req: Request, res: Response) => {
+  try {
+    const products = await Product.find({ isFeatured: true })
+      .populate("category", "name")
+      .populate("subCategory", "name")
+      .limit(10)
+      .sort({ createdAt: -1 });
+
+    res.json(products);
+  } catch (error) {
+    console.error("GET FEATURED PRODUCTS ERROR:", error);
+    return res.status(500).json({ message: "Error fetching featured products" });
+  }
+}
+
 export const deleteProduct = async (req: Request, res: Response) => {
   try {
-    await Product.findByIdAndDelete(req.params.id)
+    const product = await Product.findByIdAndDelete(req.params.id)
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" })
+    }
     res.json({
-      message: "Product deleted"
+      message: "Product deleted successfully"
     })
   } catch (error) {
+    console.error("DELETE PRODUCT ERROR:", error)
     return res.status(500).json({ message: "Error deleting product" })
   }
 }
 
 export const updateProduct = async (req: Request, res: Response) => {
   try {
-    const { title, price, oldPrice, description, category, subCategory, code, year, rating, reviews } = req.body
+    const { 
+      title, 
+      price, 
+      oldPrice, 
+      description, 
+      category, 
+      subCategory, 
+      code, 
+      year, 
+      session,
+      semester,
+      program,
+      productType,
+      rating, 
+      reviews,
+      isFeatured,
+      inStock,
+      fileUrl: bodyFileUrl
+    } = req.body
+
     const product = await Product.findById(req.params.id);
     if (!product) {
       return res.status(404).json({ message: "Product not found" });
     }
-    let image = product.image
-    if (req.file) {
-      image = await uploadToCloudinary(req.file.buffer)
-    }
-    product.title = title || product.title
-    product.price = price || product.price
-    product.oldPrice = oldPrice !== undefined ? oldPrice : product.oldPrice
-    product.description = description || product.description
-    product.category = category || product.category
-    product.subCategory = subCategory || product.subCategory
-    product.image = image
-    product.code = code || product.code
-    product.year = year || product.year
-    product.rating = rating !== undefined ? rating : product.rating
-    product.reviews = reviews !== undefined ? reviews : product.reviews
-    await product.save();
-    res.json(product);
 
+    let image = product.image
+    let fileUrl = bodyFileUrl !== undefined ? bodyFileUrl : product.fileUrl
+
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined
+    if (files) {
+      if (files["image"] && files["image"][0]) {
+        image = await uploadToCloudinary(files["image"][0].buffer, "ignoupower/images")
+      }
+      if (files["file"] && files["file"][0]) {
+        fileUrl = await uploadToCloudinary(files["file"][0].buffer, "ignoupower/files")
+      }
+    } else if (req.file) {
+      image = await uploadToCloudinary(req.file.buffer, "ignoupower/images")
+    }
+
+    product.title = title || product.title
+    if (price !== undefined) product.price = Number(price)
+    if (oldPrice !== undefined) product.oldPrice = Number(oldPrice)
+    if (description !== undefined) product.description = description
+    if (category) product.category = category
+    if (subCategory !== undefined) product.subCategory = subCategory || undefined
+    if (image) product.image = image
+    if (fileUrl !== undefined) product.fileUrl = fileUrl
+    if (code !== undefined) product.code = code.toUpperCase()
+    if (year !== undefined) product.year = year
+    if (session !== undefined) product.session = session
+    if (semester !== undefined) product.semester = semester
+    if (program !== undefined) product.program = program.toUpperCase()
+    if (productType !== undefined) product.productType = productType
+    if (rating !== undefined) product.rating = Number(rating)
+    if (reviews !== undefined) product.reviews = Number(reviews)
+    if (isFeatured !== undefined) product.isFeatured = isFeatured === true || isFeatured === "true"
+    if (inStock !== undefined) product.inStock = inStock === true || inStock === "true"
+
+    await product.save();
+    
+    const updated = await Product.findById(product._id)
+      .populate("category", "name")
+      .populate("subCategory", "name")
+
+    res.json(updated);
   } catch (error) {
+    console.error("UPDATE PRODUCT ERROR:", error)
     return res.status(500).json({ message: "Error updating product" })
   }
 }
 
 export const getSingleProduct = async (req: Request, res: Response) => {
   try {
-    const product = await Product.findById(req.params.id).populate("category", "name").populate("subCategory", "name")
+    const product = await Product.findById(req.params.id)
+      .populate("category", "name")
+      .populate("subCategory", "name")
+      
     if (!product) {
       return res.status(404).json({ message: "Product not found" });
     }
     res.json(product);
   } catch (error) {
+    console.error("GET SINGLE PRODUCT ERROR:", error)
     return res.status(500).json({ message: "Error fetching product" })
   }
 }
