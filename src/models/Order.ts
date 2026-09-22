@@ -6,6 +6,7 @@ export interface IOrderItem {
   title: string
   price: number
   quantity: number
+  session?: string
   fileUrl?: string
 }
 
@@ -20,16 +21,22 @@ export interface IOrder extends Document {
     pincode: string
     city?: string
     state?: string
+    district?: string
   }
   subtotal: number
   shippingFee: number
   discount: number
   grandTotal: number
-  paymentStatus: "Pending" | "Paid" | "Failed"
+  appliedPromo?: string
+  paymentStatus: "Pending" | "Paid" | "Failed" | "Refunded"
   orderStatus: "Processing" | "Dispatched" | "Delivered" | "Completed" | "Cancelled"
   razorpayOrderId?: string
   razorpayPaymentId?: string
   razorpaySignature?: string
+  refundId?: string
+  refundAmount?: number
+  cancellationReason?: string
+  previewImages?: string[]
   trackingNumber?: string
   courierName?: string
   adminNotes?: string
@@ -67,6 +74,10 @@ const orderSchema = new Schema<IOrder>(
           type: Number,
           default: 1
         },
+        session: {
+          type: String,
+          default: ""
+        },
         fileUrl: {
           type: String,
           default: ""
@@ -84,7 +95,8 @@ const orderSchema = new Schema<IOrder>(
       address: String,
       pincode: String,
       city: String,
-      state: String
+      state: String,
+      district: String
     },
     subtotal: {
       type: Number,
@@ -102,9 +114,13 @@ const orderSchema = new Schema<IOrder>(
       type: Number,
       default: 0
     },
+    appliedPromo: {
+      type: String,
+      default: ""
+    },
     paymentStatus: {
       type: String,
-      enum: ["Pending", "Paid", "Failed"],
+      enum: ["Pending", "Paid", "Failed", "Refunded"],
       default: "Pending"
     },
     orderStatus: {
@@ -120,6 +136,22 @@ const orderSchema = new Schema<IOrder>(
     },
     razorpaySignature: {
       type: String
+    },
+    refundId: {
+      type: String,
+      default: ""
+    },
+    refundAmount: {
+      type: Number,
+      default: 0
+    },
+    cancellationReason: {
+      type: String,
+      default: ""
+    },
+    previewImages: {
+      type: [String],
+      default: []
     },
     trackingNumber: {
       type: String,
@@ -138,3 +170,4 @@ const orderSchema = new Schema<IOrder>(
 )
 
 export default mongoose.model<IOrder>("Order", orderSchema)
+

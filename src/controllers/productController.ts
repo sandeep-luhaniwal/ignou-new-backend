@@ -24,7 +24,11 @@ export const createProduct = async (req: Request, res: Response) => {
       reviews,
       isFeatured,
       inStock,
-      fileUrl: bodyFileUrl
+      fileUrl: bodyFileUrl,
+      questionPaperUrl: bodyQuestionPaperUrl,
+      questionPageUrl: bodyQuestionPageUrl,
+      questionPaper: bodyQuestionPaper,
+      questionPdf: bodyQuestionPdf
     } = req.body
 
     if (!category) {
@@ -33,6 +37,7 @@ export const createProduct = async (req: Request, res: Response) => {
 
     let image = ""
     let fileUrl = bodyFileUrl || ""
+    let questionPaperUrl = bodyQuestionPaperUrl || bodyQuestionPageUrl || bodyQuestionPaper || bodyQuestionPdf || ""
 
     // Check if files are uploaded via multer (single or fields)
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined
@@ -42,6 +47,10 @@ export const createProduct = async (req: Request, res: Response) => {
       }
       if (files["file"] && files["file"][0]) {
         fileUrl = await uploadToCloudinary(files["file"][0].buffer, "ignoupower/files")
+      }
+      const qFile = files["questionPaper"]?.[0] || files["questionPage"]?.[0] || files["questionPdf"]?.[0] || files["questionPaperPdf"]?.[0] || files["questionFile"]?.[0]
+      if (qFile) {
+        questionPaperUrl = await uploadToCloudinary(qFile.buffer, "ignoupower/question_papers")
       }
     } else if (req.file) {
       image = await uploadToCloudinary(req.file.buffer, "ignoupower/images")
@@ -54,6 +63,8 @@ export const createProduct = async (req: Request, res: Response) => {
       description,
       image,
       fileUrl,
+      questionPaperUrl,
+      questionPageUrl: questionPaperUrl,
       category,
       subCategory: subCategory || undefined,
       code: code ? code.toUpperCase() : "",
@@ -265,7 +276,11 @@ export const updateProduct = async (req: Request, res: Response) => {
       reviews,
       isFeatured,
       inStock,
-      fileUrl: bodyFileUrl
+      fileUrl: bodyFileUrl,
+      questionPaperUrl: bodyQuestionPaperUrl,
+      questionPageUrl: bodyQuestionPageUrl,
+      questionPaper: bodyQuestionPaper,
+      questionPdf: bodyQuestionPdf
     } = req.body
 
     const product = await Product.findById(req.params.id);
@@ -275,6 +290,15 @@ export const updateProduct = async (req: Request, res: Response) => {
 
     let image = product.image
     let fileUrl = bodyFileUrl !== undefined ? bodyFileUrl : product.fileUrl
+    let questionPaperUrl = bodyQuestionPaperUrl !== undefined
+      ? bodyQuestionPaperUrl
+      : (bodyQuestionPageUrl !== undefined
+          ? bodyQuestionPageUrl
+          : (bodyQuestionPaper !== undefined
+              ? bodyQuestionPaper
+              : (bodyQuestionPdf !== undefined
+                  ? bodyQuestionPdf
+                  : (product.questionPaperUrl || product.questionPageUrl || ""))))
 
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined
     if (files) {
@@ -283,6 +307,10 @@ export const updateProduct = async (req: Request, res: Response) => {
       }
       if (files["file"] && files["file"][0]) {
         fileUrl = await uploadToCloudinary(files["file"][0].buffer, "ignoupower/files")
+      }
+      const qFile = files["questionPaper"]?.[0] || files["questionPage"]?.[0] || files["questionPdf"]?.[0] || files["questionPaperPdf"]?.[0] || files["questionFile"]?.[0]
+      if (qFile) {
+        questionPaperUrl = await uploadToCloudinary(qFile.buffer, "ignoupower/question_papers")
       }
     } else if (req.file) {
       image = await uploadToCloudinary(req.file.buffer, "ignoupower/images")
@@ -296,6 +324,10 @@ export const updateProduct = async (req: Request, res: Response) => {
     if (subCategory !== undefined) product.subCategory = subCategory || undefined
     if (image) product.image = image
     if (fileUrl !== undefined) product.fileUrl = fileUrl
+    if (questionPaperUrl !== undefined) {
+      product.questionPaperUrl = questionPaperUrl
+      product.questionPageUrl = questionPaperUrl
+    }
     if (code !== undefined) product.code = code.toUpperCase()
     if (year !== undefined) product.year = year
     if (session !== undefined) product.session = session

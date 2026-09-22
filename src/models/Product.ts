@@ -7,6 +7,8 @@ export interface IProduct extends Document {
   description?: string
   image?: string
   fileUrl?: string
+  questionPaperUrl?: string
+  questionPageUrl?: string
   category: mongoose.Types.ObjectId
   subCategory?: mongoose.Types.ObjectId
   code?: string
@@ -47,6 +49,14 @@ const productSchema = new Schema<IProduct>(
       default: ""
     },
     fileUrl: {
+      type: String,
+      default: ""
+    },
+    questionPaperUrl: {
+      type: String,
+      default: ""
+    },
+    questionPageUrl: {
       type: String,
       default: ""
     },

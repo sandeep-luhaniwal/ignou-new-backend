@@ -1,11 +1,14 @@
 import mongoose from "mongoose"
-import { Response } from "express"
+import { Request, Response } from "express"
 import { AuthRequest } from "../middleware/authMiddleware"
 import Order from "../models/Order"
 import Product from "../models/Product"
 import User from "../models/User"
+import PromoCode from "../models/PromoCode"
 import Razorpay from "razorpay"
 import crypto from "crypto"
+import { sendEmail } from "../utils/sendEmail"
+import { uploadToCloudinary } from "../utils/cloudinary"
 
 // Initialize Razorpay client lazily
 let razorpayInstance: Razorpay | null = null
@@ -19,9 +22,93 @@ const getRazorpay = () => {
   return razorpayInstance
 }
 
+export const validatePromo = async (req: Request | AuthRequest, res: Response) => {
+  try {
+    const { code, subtotal } = req.body
+    if (!code || typeof code !== "string") {
+      return res.status(400).json({ valid: false, message: "Promo code is required" })
+    }
+
+    const cleanCode = code.trim().toUpperCase()
+    const amount = Number(subtotal) || 0
+
+    const promo = await PromoCode.findOne({ code: cleanCode })
+
+    if (promo) {
+      if (!promo.isActive) {
+        return res.status(400).json({ 
+          valid: false, 
+          message: "This promo code is currently disabled or blocked by admin." 
+        })
+      }
+
+      if (promo.expiresAt && new Date() > new Date(promo.expiresAt)) {
+        return res.status(400).json({ valid: false, message: "This promo code has expired." })
+      }
+
+      if (promo.minOrderAmount && amount < promo.minOrderAmount) {
+        return res.status(400).json({
+          valid: false,
+          message: `Minimum order amount of ₹${promo.minOrderAmount} is required for this code.`
+        })
+      }
+
+      let discount = 0
+      if (promo.discountType === "percentage") {
+        discount = Math.round((amount * promo.discountValue) / 100)
+        if (promo.maxDiscount && promo.maxDiscount > 0) {
+          discount = Math.min(discount, promo.maxDiscount)
+        }
+      } else {
+        discount = Math.min(promo.discountValue, amount)
+      }
+
+      return res.json({
+        valid: true,
+        code: promo.code,
+        discount,
+        message: `${promo.code} applied successfully! You saved ₹${discount}.`
+      })
+    }
+
+    // Fallback built-in codes
+    let discount = 0
+    let message = ""
+
+    if (cleanCode === "IGNOU10") {
+      discount = Math.round(amount * 0.10)
+      message = "10% discount applied successfully!"
+    } else if (cleanCode === "WELCOME50") {
+      discount = Math.min(50, amount)
+      message = "₹50 flat discount applied successfully!"
+    } else if (cleanCode === "IGNOU20" || cleanCode === "FIRST20") {
+      discount = Math.round(amount * 0.20)
+      message = "20% discount applied successfully!"
+    } else if (cleanCode === "FLAT100") {
+      if (amount < 200) {
+        return res.status(400).json({ valid: false, message: "Minimum cart value of ₹200 required for FLAT100" })
+      }
+      discount = 100
+      message = "₹100 flat discount applied successfully!"
+    } else {
+      return res.status(400).json({ valid: false, message: "Invalid or expired promo code" })
+    }
+
+    res.json({
+      valid: true,
+      code: cleanCode,
+      discount,
+      message
+    })
+  } catch (error: any) {
+    console.error("VALIDATE PROMO ERROR:", error)
+    res.status(500).json({ valid: false, message: "Error validating promo code", error: error?.message })
+  }
+}
+
 export const createOrder = async (req: AuthRequest, res: Response) => {
   try {
-    const { items, deliveryType, shippingAddress, subtotal, shippingFee, discount, grandTotal } = req.body
+    const { items, deliveryType, shippingAddress, subtotal, shippingFee, discount, grandTotal, appliedPromo, promoCode } = req.body
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "No items in order" })
@@ -30,6 +117,14 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     if (!req.user || !req.user._id) {
       return res.status(401).json({ message: "User not authenticated" })
     }
+
+    // Normalize deliveryType (handle "handwritten", "Handwritten", "pdf", "PDF")
+    const normalizedDeliveryType: "PDF" | "Handwritten" = 
+      (deliveryType && typeof deliveryType === "string" && deliveryType.toLowerCase() === "handwritten")
+        ? "Handwritten"
+        : "PDF"
+
+    const isHandwrittenOrder = normalizedDeliveryType === "Handwritten"
 
     const orderItems = await Promise.all(
       items.map(async (item: any) => {
@@ -49,27 +144,91 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           title: item.title || productDoc?.title || item.code || "Item",
           price: Number(item.price) || productDoc?.price || 0,
           quantity: Number(item.quantity) || 1,
-          fileUrl: item.fileUrl || productDoc?.fileUrl || ""
+          session: item.session || productDoc?.session || "",
+          fileUrl: isHandwrittenOrder ? "" : (item.fileUrl || productDoc?.fileUrl || "")
         }
       })
     )
+
+    const promo = String(appliedPromo || promoCode || "").trim().toUpperCase()
+    
+    // Calculate subtotal from items if not provided or to ensure accuracy
+    const calculatedSubtotal = orderItems.reduce((acc, it) => acc + (it.price * it.quantity), 0)
+    const finalSubtotal = Number(subtotal) > 0 ? Number(subtotal) : calculatedSubtotal
+
+    // Calculate discount based on active promo code
+    let finalDiscount = Number(discount) || 0
+    let validatedPromoCode = ""
+
+    if (promo) {
+      const promoDoc = await PromoCode.findOne({ code: promo })
+      if (promoDoc) {
+        // Only apply discount if promo code is ACTIVE and not blocked / expired
+        if (promoDoc.isActive && (!promoDoc.expiresAt || new Date() <= new Date(promoDoc.expiresAt))) {
+          if (!promoDoc.minOrderAmount || finalSubtotal >= promoDoc.minOrderAmount) {
+            if (promoDoc.discountType === "percentage") {
+              finalDiscount = Math.round((finalSubtotal * promoDoc.discountValue) / 100)
+              if (promoDoc.maxDiscount && promoDoc.maxDiscount > 0) {
+                finalDiscount = Math.min(finalDiscount, promoDoc.maxDiscount)
+              }
+            } else {
+              finalDiscount = Math.min(promoDoc.discountValue, finalSubtotal)
+            }
+            validatedPromoCode = promoDoc.code
+            promoDoc.usedCount = (promoDoc.usedCount || 0) + 1
+            await promoDoc.save().catch(e => console.error("Error saving promo usedCount:", e))
+          }
+        }
+      } else {
+        if (promo === "IGNOU10") {
+          finalDiscount = Math.round(finalSubtotal * 0.10)
+          validatedPromoCode = "IGNOU10"
+        } else if (promo === "WELCOME50") {
+          finalDiscount = Math.min(50, finalSubtotal)
+          validatedPromoCode = "WELCOME50"
+        } else if (promo === "IGNOU20" || promo === "FIRST20") {
+          finalDiscount = Math.round(finalSubtotal * 0.20)
+          validatedPromoCode = promo
+        } else if (promo === "FLAT100") {
+          finalDiscount = finalSubtotal >= 200 ? 100 : Math.min(finalDiscount, finalSubtotal)
+          validatedPromoCode = "FLAT100"
+        }
+      }
+    }
+
+    const calculatedShippingFee = isHandwrittenOrder 
+      ? (Number(shippingFee) > 0 ? Number(shippingFee) : orderItems.reduce((acc, it) => acc + (60 * it.quantity), 0))
+      : 0
+
+    // Ensure grandTotal accurately reflects the reduced balance after discount
+    const calculatedGrandTotal = Math.max(0, finalSubtotal + calculatedShippingFee - finalDiscount)
+    const finalGrandTotal = grandTotal !== undefined ? Math.min(Number(grandTotal), calculatedGrandTotal) : calculatedGrandTotal
 
     // 1. Create order in MongoDB (with default paymentStatus: "Pending")
     const order = await Order.create({
       user: req.user._id,
       items: orderItems,
-      deliveryType: deliveryType || "PDF",
-      shippingAddress,
-      subtotal: Number(subtotal) || 0,
-      shippingFee: Number(shippingFee) || 0,
-      discount: Number(discount) || 0,
-      grandTotal: Number(grandTotal) || 0,
-      paymentStatus: "Pending",
-      orderStatus: "Processing"
+      deliveryType: normalizedDeliveryType,
+      shippingAddress: shippingAddress ? {
+        name: shippingAddress.name || "",
+        phone: shippingAddress.phone || "",
+        address: shippingAddress.address || "",
+        pincode: shippingAddress.pincode || "",
+        city: shippingAddress.city || "",
+        state: shippingAddress.state || "",
+        district: shippingAddress.district || ""
+      } : undefined,
+      subtotal: finalSubtotal,
+      shippingFee: calculatedShippingFee,
+      discount: finalDiscount,
+      grandTotal: finalGrandTotal,
+      appliedPromo: promo,
+      paymentStatus: finalGrandTotal === 0 ? "Paid" : "Pending",
+      orderStatus: (finalGrandTotal === 0 && !isHandwrittenOrder) ? "Completed" : "Processing"
     })
 
-    // 2. Create Razorpay order
-    const amountInPaise = Math.round(Number(grandTotal || subtotal || 0) * 100)
+    // 2. Create Razorpay order with the reduced grandTotal amount
+    const amountInPaise = Math.round(finalGrandTotal * 100)
     let razorpayOrder = null
     if (amountInPaise > 0) {
       const options = {
@@ -92,9 +251,9 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       .populate("user", "name email phone enrolmentNo")
       .populate("items.product", "title code image")
 
-    // Before payment is confirmed, do not expose fileUrl in createOrder response
+    // Before payment is confirmed or for handwritten delivery, do not expose fileUrl in createOrder response
     const sanitizedOrder = populatedOrder?.toObject()
-    if (sanitizedOrder && sanitizedOrder.paymentStatus !== "Paid") {
+    if (sanitizedOrder && (sanitizedOrder.paymentStatus !== "Paid" || sanitizedOrder.deliveryType === "Handwritten")) {
       sanitizedOrder.items = sanitizedOrder.items.map((i: any) => ({
         ...i,
         fileUrl: undefined,
@@ -121,17 +280,29 @@ export const getOrders = async (req: AuthRequest, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 10
     const skip = (page - 1) * limit
 
-    const total = await Order.countDocuments({ user: req.user._id })
-    const orders = await Order.find({ user: req.user._id })
+    const isAdmin = req.user && req.user.role === "admin"
+    const myOnly = req.query.myOnly === "true"
+
+    // If admin and didn't specify myOnly=true, return all orders; otherwise return user's orders
+    const query: any = (isAdmin && !myOnly) ? {} : { user: req.user._id }
+
+    const total = await Order.countDocuments(query)
+    let orderQuery = Order.find(query)
       .populate("items.product", "title code image fileUrl")
       .skip(skip)
       .limit(limit)
       .sort({ createdAt: -1 })
 
-    // Hide fileUrl for unpaid orders
+    if (isAdmin) {
+      orderQuery = orderQuery.populate("user", "name email phone enrolmentNo")
+    }
+
+    const orders = await orderQuery
+
+    // Hide fileUrl for unpaid orders or handwritten orders (unless admin)
     const sanitizedOrders = orders.map((orderDoc) => {
       const orderObj = orderDoc.toObject()
-      if (orderObj.paymentStatus !== "Paid") {
+      if ((orderObj.paymentStatus !== "Paid" || orderObj.deliveryType === "Handwritten") && !isAdmin) {
         orderObj.items = orderObj.items.map((i: any) => ({
           ...i,
           fileUrl: undefined,
@@ -142,6 +313,7 @@ export const getOrders = async (req: AuthRequest, res: Response) => {
     })
 
     res.json({
+      success: true,
       data: sanitizedOrders,
       pagination: {
         total,
@@ -172,8 +344,8 @@ export const getOrderById = async (req: AuthRequest, res: Response) => {
     }
 
     const orderObj = order.toObject()
-    // If not paid and not admin, hide fileUrl
-    if (orderObj.paymentStatus !== "Paid" && req.user.role !== "admin") {
+    // If not paid and not admin, or if handwritten delivery for normal user, hide fileUrl
+    if ((orderObj.paymentStatus !== "Paid" || orderObj.deliveryType === "Handwritten") && req.user.role !== "admin") {
       orderObj.items = orderObj.items.map((i: any) => ({
         ...i,
         fileUrl: undefined,
@@ -211,12 +383,21 @@ export const verifyPayment = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: "Invalid payment signature, verification failed" })
     }
 
-    // Securely update the order belonging to THIS authenticated user
+    // Find the order first to check delivery type
+    const existingOrder = await Order.findOne({ razorpayOrderId: razorpay_order_id, user: req.user._id })
+    if (!existingOrder) {
+      return res.status(404).json({ message: "Order not found or does not belong to this user" })
+    }
+
+    const isHandwritten = existingOrder.deliveryType === "Handwritten"
+
+    // Securely update the order:
+    // Handwritten orders remain 'Processing' until courier dispatched. PDF orders become 'Completed'.
     const order = await Order.findOneAndUpdate(
       { razorpayOrderId: razorpay_order_id, user: req.user._id },
       {
         paymentStatus: "Paid",
-        orderStatus: "Completed",
+        orderStatus: isHandwritten ? "Processing" : "Completed",
         razorpayPaymentId: razorpay_payment_id,
         razorpaySignature: razorpay_signature
       },
@@ -229,21 +410,32 @@ export const verifyPayment = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: "Order not found or does not belong to this user" })
     }
 
-    // Provide immediate list of downloadable purchased files
-    const purchasedFiles = order.items.map((item: any) => ({
-      itemId: item._id,
-      productId: item.product?._id || item.product,
-      code: item.code || item.product?.code || "N/A",
-      title: item.title || item.product?.title || "Product",
-      fileUrl: item.fileUrl || item.product?.fileUrl || "",
-      price: item.price,
-      quantity: item.quantity
-    }))
+    // Provide downloadable purchased files ONLY for PDF/Digital delivery
+    const purchasedFiles = isHandwritten
+      ? []
+      : order.items.map((item: any) => ({
+          itemId: item._id,
+          productId: item.product?._id || item.product,
+          code: item.code || item.product?.code || "N/A",
+          title: item.title || item.product?.title || "Product",
+          fileUrl: item.fileUrl || item.product?.fileUrl || "",
+          price: item.price,
+          quantity: item.quantity
+        }))
+
+    const sanitizedOrder = order.toObject()
+    if (isHandwritten) {
+      sanitizedOrder.items = sanitizedOrder.items.map((i: any) => ({
+        ...i,
+        fileUrl: undefined,
+        product: i.product ? { ...i.product, fileUrl: undefined } : undefined
+      }))
+    }
 
     res.status(200).json({
       success: true,
       message: "Payment verified successfully",
-      order,
+      order: sanitizedOrder,
       downloads: purchasedFiles
     })
   } catch (error: any) {
@@ -280,6 +472,13 @@ export const downloadOrderItem = async (req: AuthRequest, res: Response) => {
     if (order.paymentStatus !== "Paid") {
       return res.status(403).json({ 
         message: "Payment not completed for this order. Please complete payment to download files." 
+      })
+    }
+
+    // 3. Block PDF download if deliveryType is Handwritten (physical courier)
+    if (order.deliveryType === "Handwritten" && req.user.role !== "admin") {
+      return res.status(400).json({ 
+        message: "This is a physical handwritten order to be delivered by courier. PDF download is not applicable." 
       })
     }
 
@@ -326,14 +525,14 @@ export const getAllOrdersAdmin = async (req: AuthRequest, res: Response) => {
     const deliveryType = req.query.deliveryType as string
 
     const query: any = {}
-    if (paymentStatus && paymentStatus !== "All") {
-      query.paymentStatus = paymentStatus
+    if (paymentStatus && paymentStatus !== "All" && paymentStatus !== "all") {
+      query.paymentStatus = { $regex: new RegExp("^" + paymentStatus + "$", "i") }
     }
-    if (orderStatus && orderStatus !== "All") {
-      query.orderStatus = orderStatus
+    if (orderStatus && orderStatus !== "All" && orderStatus !== "all") {
+      query.orderStatus = { $regex: new RegExp("^" + orderStatus + "$", "i") }
     }
-    if (deliveryType && deliveryType !== "All") {
-      query.deliveryType = deliveryType
+    if (deliveryType && deliveryType !== "All" && deliveryType !== "all") {
+      query.deliveryType = { $regex: new RegExp("^" + deliveryType + "$", "i") }
     }
 
     if (search) {
@@ -354,6 +553,11 @@ export const getAllOrdersAdmin = async (req: AuthRequest, res: Response) => {
         { user: { $in: userIds } },
         { "shippingAddress.name": searchRegex },
         { "shippingAddress.phone": searchRegex },
+        { "shippingAddress.address": searchRegex },
+        { "shippingAddress.state": searchRegex },
+        { "shippingAddress.district": searchRegex },
+        { "shippingAddress.city": searchRegex },
+        { "shippingAddress.pincode": searchRegex },
         { razorpayOrderId: searchRegex },
         { razorpayPaymentId: searchRegex },
         { "items.code": searchRegex },
@@ -451,5 +655,371 @@ export const deleteOrderAdmin = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error("DELETE ORDER ERROR:", error)
     res.status(500).json({ message: "Error deleting order" })
+  }
+}
+
+// 1. Get ONLY Handwritten orders for Admin
+export const getHandwrittenOrdersAdmin = async (req: AuthRequest, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1
+    const limit = parseInt(req.query.limit as string) || 10
+    const skip = (page - 1) * limit
+    const search = (req.query.search as string || "").trim()
+    const paymentStatus = req.query.paymentStatus as string
+    const orderStatus = req.query.orderStatus as string
+
+    const query: any = {
+      deliveryType: { $regex: /^handwritten$/i }
+    }
+
+    if (paymentStatus && paymentStatus !== "All" && paymentStatus !== "all") {
+      query.paymentStatus = { $regex: new RegExp("^" + paymentStatus + "$", "i") }
+    }
+    if (orderStatus && orderStatus !== "All" && orderStatus !== "all") {
+      query.orderStatus = { $regex: new RegExp("^" + orderStatus + "$", "i") }
+    }
+
+    if (search) {
+      const searchRegex = new RegExp(search, "i")
+      const matchedUsers = await User.find({
+        $or: [
+          { name: searchRegex },
+          { email: searchRegex },
+          { phone: searchRegex },
+          { enrolmentNo: searchRegex }
+        ]
+      }).select("_id")
+      const userIds = matchedUsers.map(u => u._id)
+
+      query.$or = [
+        { user: { $in: userIds } },
+        { "shippingAddress.name": searchRegex },
+        { "shippingAddress.phone": searchRegex },
+        { "shippingAddress.city": searchRegex },
+        { "shippingAddress.state": searchRegex },
+        { "shippingAddress.district": searchRegex },
+        { "shippingAddress.pincode": searchRegex },
+        { "shippingAddress.address": searchRegex },
+        { razorpayOrderId: searchRegex },
+        { razorpayPaymentId: searchRegex },
+        { trackingNumber: searchRegex },
+        { courierName: searchRegex },
+        { "items.code": searchRegex },
+        { "items.title": searchRegex }
+      ]
+    }
+
+    const total = await Order.countDocuments(query)
+    const orders = await Order.find(query)
+      .populate("user", "name email phone enrolmentNo")
+      .populate("items.product", "title code image")
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 })
+
+    // Summary counts for handwritten orders
+    const [totalHandwritten, processingCount, dispatchedCount, deliveredCount, cancelledCount, paidCount, revenueAgg] = await Promise.all([
+      Order.countDocuments({ deliveryType: { $regex: /^handwritten$/i } }),
+      Order.countDocuments({ deliveryType: { $regex: /^handwritten$/i }, orderStatus: "Processing" }),
+      Order.countDocuments({ deliveryType: { $regex: /^handwritten$/i }, orderStatus: "Dispatched" }),
+      Order.countDocuments({ deliveryType: { $regex: /^handwritten$/i }, orderStatus: "Delivered" }),
+      Order.countDocuments({ deliveryType: { $regex: /^handwritten$/i }, orderStatus: "Cancelled" }),
+      Order.countDocuments({ deliveryType: { $regex: /^handwritten$/i }, paymentStatus: "Paid" }),
+      Order.aggregate([
+        { $match: { deliveryType: { $regex: /^handwritten$/i }, paymentStatus: "Paid" } },
+        { $group: { _id: null, total: { $sum: "$grandTotal" } } }
+      ])
+    ])
+
+    const totalRevenue = revenueAgg.length > 0 ? (revenueAgg[0].total || 0) : 0
+
+    res.json({
+      success: true,
+      data: orders,
+      summary: {
+        totalOrders: totalHandwritten,
+        processingOrders: processingCount,
+        dispatchedOrders: dispatchedCount,
+        deliveredOrders: deliveredCount,
+        cancelledOrders: cancelledCount,
+        paidOrders: paidCount,
+        totalRevenue
+      },
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    })
+  } catch (error: any) {
+    console.error("GET HANDWRITTEN ORDERS ERROR:", error)
+    res.status(500).json({ 
+      message: "Error fetching handwritten orders",
+      error: error?.message || "Internal server error"
+    })
+  }
+}
+
+// 2. Edit Handwritten Order with images and notify customer via Email
+export const updateHandwrittenOrderAdmin = async (req: AuthRequest, res: Response) => {
+  try {
+    const { 
+      orderStatus, 
+      paymentStatus, 
+      trackingNumber, 
+      courierName, 
+      adminNotes,
+      notifyCustomer 
+    } = req.body
+
+    const order = await Order.findById(req.params.id)
+      .populate("user", "name email phone enrolmentNo")
+      .populate("items.product", "title code image")
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    // Handle new uploaded proof/preview images via multer
+    const uploadedImages: string[] = []
+    const files = req.files as Express.Multer.File[] | { [fieldname: string]: Express.Multer.File[] } | undefined
+
+    if (Array.isArray(files) && files.length > 0) {
+      for (const file of files) {
+        const url = await uploadToCloudinary(file.buffer, "ignoupower/handwritten_proofs")
+        uploadedImages.push(url)
+      }
+    } else if (files && typeof files === "object") {
+      const allFiles = Object.values(files).flat()
+      for (const file of allFiles) {
+        const url = await uploadToCloudinary(file.buffer, "ignoupower/handwritten_proofs")
+        uploadedImages.push(url)
+      }
+    } else if (req.file) {
+      const url = await uploadToCloudinary(req.file.buffer, "ignoupower/handwritten_proofs")
+      uploadedImages.push(url)
+    }
+
+    if (uploadedImages.length > 0) {
+      order.previewImages = [...(order.previewImages || []), ...uploadedImages]
+    }
+
+    // Direct previewImages passed as array or string URLs
+    if (req.body.previewImages) {
+      let passedUrls: string[] = []
+      if (Array.isArray(req.body.previewImages)) {
+        passedUrls = req.body.previewImages
+      } else if (typeof req.body.previewImages === "string") {
+        try {
+          const parsed = JSON.parse(req.body.previewImages)
+          passedUrls = Array.isArray(parsed) ? parsed : [req.body.previewImages]
+        } catch {
+          passedUrls = [req.body.previewImages]
+        }
+      }
+      order.previewImages = Array.from(new Set([...(order.previewImages || []), ...passedUrls]))
+    }
+
+    if (orderStatus) order.orderStatus = orderStatus
+    if (paymentStatus) order.paymentStatus = paymentStatus
+    if (trackingNumber !== undefined) order.trackingNumber = trackingNumber
+    if (courierName !== undefined) order.courierName = courierName
+    if (adminNotes !== undefined) order.adminNotes = adminNotes
+
+    await order.save()
+
+    // Send email to customer
+    const userEmail = (order.user as any)?.email
+    const userName = (order.user as any)?.name || order.shippingAddress?.name || "Student"
+    const shouldNotify = notifyCustomer !== false && notifyCustomer !== "false"
+
+    if (shouldNotify && userEmail) {
+      try {
+        const itemsListHtml = order.items.map(i => `
+          <li style="margin-bottom: 8px;">
+            <strong>${i.code || "Item"}</strong> - ${i.title} (Qty: ${i.quantity})
+          </li>
+        `).join("")
+
+        const imagesHtml = (order.previewImages && order.previewImages.length > 0) ? `
+          <div style="margin-top: 15px;">
+            <h4 style="color: #333; margin-bottom: 8px;">Attached Images / Preview Proof:</h4>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              ${order.previewImages.map(imgUrl => `
+                <a href="${imgUrl}" target="_blank" style="display: inline-block; margin-right: 10px;">
+                  <img src="${imgUrl}" alt="Proof" style="width: 140px; height: 140px; object-fit: cover; border-radius: 8px; border: 1px solid #e2e8f0;" />
+                </a>
+              `).join("")}
+            </div>
+          </div>
+        ` : ""
+
+        const trackingHtml = order.trackingNumber ? `
+          <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px 16px; margin: 15px 0;">
+            <p style="margin: 0; color: #166534; font-weight: 600;">🚚 Courier / Tracking Details:</p>
+            <p style="margin: 4px 0 0 0; color: #15803d;">Courier: <strong>${order.courierName || "Speed Post"}</strong></p>
+            <p style="margin: 2px 0 0 0; color: #15803d;">Tracking No: <strong>${order.trackingNumber}</strong></p>
+          </div>
+        ` : ""
+
+        const emailHtml = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; color: #1e293b;">
+            <h2 style="color: #4f46e5; margin-top: 0;">IGNOU Power - Handwritten Order Update</h2>
+            <p>Dear <strong>${userName}</strong>,</p>
+            <p>There is an update regarding your Handwritten Hardcopy Assignment order <strong>#${order._id}</strong>.</p>
+            
+            <div style="background: #f8fafc; padding: 14px; border-radius: 8px; margin: 15px 0;">
+              <p style="margin: 0 0 6px 0;"><strong>Order Status:</strong> <span style="color: #4f46e5; font-weight: bold;">${order.orderStatus}</span></p>
+              <p style="margin: 0 0 6px 0;"><strong>Payment Status:</strong> ${order.paymentStatus}</p>
+              <p style="margin: 0;"><strong>Total Amount:</strong> ₹${order.grandTotal}</p>
+            </div>
+
+            ${trackingHtml}
+
+            <h4 style="margin-bottom: 6px;">Ordered Items:</h4>
+            <ul style="padding-left: 20px; margin-top: 0;">
+              ${itemsListHtml}
+            </ul>
+
+            ${order.adminNotes ? `<p><strong>Admin Note:</strong> ${order.adminNotes}</p>` : ""}
+
+            ${imagesHtml}
+
+            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+            <p style="font-size: 13px; color: #64748b; margin-bottom: 0;">
+              If you have any questions, feel free to reply to this email or contact support.
+            </p>
+          </div>
+        `
+
+        await sendEmail({
+          to: userEmail,
+          subject: `Order Update #${order._id} - ${order.orderStatus} (Handwritten Hardcopy)`,
+          html: emailHtml
+        })
+      } catch (emailErr) {
+        console.error("Failed to send customer notification email:", emailErr)
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "Handwritten order updated and customer notified successfully",
+      order
+    })
+  } catch (error: any) {
+    console.error("UPDATE HANDWRITTEN ORDER ERROR:", error)
+    res.status(500).json({ 
+      message: "Error updating handwritten order",
+      error: error?.message || "Internal server error"
+    })
+  }
+}
+
+// 3. Cancel Order & Automatic Razorpay Refund API
+export const cancelAndRefundOrderAdmin = async (req: AuthRequest, res: Response) => {
+  try {
+    const { cancellationReason, refundAmount: customRefundAmount } = req.body
+    const order = await Order.findById(req.params.id)
+      .populate("user", "name email phone enrolmentNo")
+      .populate("items.product", "title code")
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    if (order.orderStatus === "Cancelled" && order.paymentStatus === "Refunded") {
+      return res.status(400).json({ message: "Order is already cancelled and refunded" })
+    }
+
+    let refundResult: any = null
+    const finalRefundAmount = Number(customRefundAmount) || order.grandTotal || 0
+
+    // If order was Paid via Razorpay, trigger automatic refund
+    if (order.paymentStatus === "Paid" && order.razorpayPaymentId) {
+      try {
+        const razorpay = getRazorpay()
+        const amountInPaise = Math.round(finalRefundAmount * 100)
+
+        refundResult = await razorpay.payments.refund(order.razorpayPaymentId, {
+          amount: amountInPaise,
+          notes: {
+            orderId: order._id.toString(),
+            reason: cancellationReason || "Order cancelled by admin"
+          }
+        })
+
+        order.refundId = refundResult?.id || "REFUND_SUCCESS"
+        order.refundAmount = finalRefundAmount
+        order.paymentStatus = "Refunded"
+      } catch (rzpErr: any) {
+        console.error("Razorpay refund error:", rzpErr)
+        return res.status(500).json({
+          message: "Failed to process Razorpay refund. Please check Razorpay keys or transaction status.",
+          error: rzpErr?.error?.description || rzpErr?.message || rzpErr
+        })
+      }
+    } else {
+      order.paymentStatus = order.paymentStatus === "Paid" ? "Refunded" : order.paymentStatus
+    }
+
+    order.orderStatus = "Cancelled"
+    order.cancellationReason = cancellationReason || "Order cancelled by admin"
+    await order.save()
+
+    // Send Cancellation & Refund email to user
+    const userEmail = (order.user as any)?.email
+    const userName = (order.user as any)?.name || order.shippingAddress?.name || "Student"
+
+    if (userEmail) {
+      try {
+        const refundInfoHtml = order.refundId ? `
+          <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 12px 16px; margin: 15px 0;">
+            <p style="margin: 0; color: #065f46; font-weight: 600;">💰 Refund Processed Successfully:</p>
+            <p style="margin: 4px 0 0 0; color: #047857;">Refund ID: <strong>${order.refundId}</strong></p>
+            <p style="margin: 2px 0 0 0; color: #047857;">Refund Amount: <strong>₹${order.refundAmount || order.grandTotal}</strong></p>
+            <p style="margin: 4px 0 0 0; font-size: 12px; color: #047857;">The amount will reflect in your original payment method in 5-7 business days.</p>
+          </div>
+        ` : ""
+
+        const emailHtml = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; color: #1e293b;">
+            <h2 style="color: #dc2626; margin-top: 0;">Order Cancelled & Refund Notification</h2>
+            <p>Dear <strong>${userName}</strong>,</p>
+            <p>Your order <strong>#${order._id}</strong> has been cancelled.</p>
+            
+            <p><strong>Reason for cancellation:</strong> ${order.cancellationReason}</p>
+
+            ${refundInfoHtml}
+
+            <p style="margin-top: 20px; font-size: 13px; color: #64748b;">
+              If you have any questions regarding your refund or cancellation, please reach out to our support team.
+            </p>
+          </div>
+        `
+
+        await sendEmail({
+          to: userEmail,
+          subject: `Order #${order._id} Cancelled & Refund Initiated - IGNOU Power`,
+          html: emailHtml
+        })
+      } catch (emailErr) {
+        console.error("Failed to send cancellation email:", emailErr)
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "Order cancelled and payment refund processed successfully",
+      order,
+      refund: refundResult
+    })
+  } catch (error: any) {
+    console.error("CANCEL AND REFUND ERROR:", error)
+    res.status(500).json({ 
+      message: "Error cancelling order and processing refund",
+      error: error?.message || "Internal server error"
+    })
   }
 }

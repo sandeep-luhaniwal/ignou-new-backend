@@ -13,6 +13,7 @@ import queryRoutes from "./routes/queryRoutes"
 import noticeRoutes from "./routes/noticeRoutes"
 import adminRoutes from "./routes/adminRoutes"
 import paymentRoutes from "./routes/paymentRoutes"
+import promoRoutes from "./routes/promoRoutes"
 
 dotenv.config()
 
@@ -90,6 +91,8 @@ app.use("/api/assignments", productRoutes)
 app.use("/api/category", categoryRoutes)
 app.use("/api/comments", commentRoutes)
 app.use("/api/orders", orderRoutes)
+app.use("/api/promos", promoRoutes)
+app.use("/api/coupons", promoRoutes)
 app.use("/api/queries", queryRoutes)
 app.use("/api/notices", noticeRoutes)
 app.use("/api/admin", adminRoutes)
