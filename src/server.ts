@@ -1,5 +1,5 @@
+import "dotenv/config"
 import express, { Request, Response, NextFunction } from "express"
-import dotenv from "dotenv"
 import cors from "cors"
 import { createServer } from "http"
 import { Server } from "socket.io"
@@ -14,8 +14,6 @@ import noticeRoutes from "./routes/noticeRoutes"
 import adminRoutes from "./routes/adminRoutes"
 import paymentRoutes from "./routes/paymentRoutes"
 import promoRoutes from "./routes/promoRoutes"
-
-dotenv.config()
 
 const app = express()
 const httpServer = createServer(app)
