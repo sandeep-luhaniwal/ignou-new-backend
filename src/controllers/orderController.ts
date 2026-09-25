@@ -413,15 +413,21 @@ export const verifyPayment = async (req: AuthRequest, res: Response) => {
     // Provide downloadable purchased files ONLY for PDF/Digital delivery
     const purchasedFiles = isHandwritten
       ? []
-      : order.items.map((item: any) => ({
-          itemId: item._id,
-          productId: item.product?._id || item.product,
-          code: item.code || item.product?.code || "N/A",
-          title: item.title || item.product?.title || "Product",
-          fileUrl: item.fileUrl || item.product?.fileUrl || "",
-          price: item.price,
-          quantity: item.quantity
-        }))
+      : order.items.map((item: any) => {
+          let fileUrl = item.fileUrl || item.product?.fileUrl || ""
+          if (fileUrl.includes("res.cloudinary.com") && fileUrl.includes("/upload/") && !fileUrl.includes("/fl_attachment")) {
+            fileUrl = fileUrl.replace("/upload/", "/upload/fl_attachment/")
+          }
+          return {
+            itemId: item._id,
+            productId: item.product?._id || item.product,
+            code: item.code || item.product?.code || "N/A",
+            title: item.title || item.product?.title || "Product",
+            fileUrl,
+            price: item.price,
+            quantity: item.quantity
+          }
+        })
 
     const sanitizedOrder = order.toObject()
     if (isHandwritten) {
@@ -493,9 +499,14 @@ export const downloadOrderItem = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: "Item not found in your purchased order" })
     }
 
-    const downloadUrl = item.fileUrl || (item.product as any)?.fileUrl
+    let downloadUrl = item.fileUrl || (item.product as any)?.fileUrl
     if (!downloadUrl) {
       return res.status(404).json({ message: "PDF file is not uploaded or available for this product yet" })
+    }
+
+    // Force direct download on mobile/desktop by adding fl_attachment for Cloudinary URLs
+    if (downloadUrl.includes("res.cloudinary.com") && downloadUrl.includes("/upload/") && !downloadUrl.includes("/fl_attachment")) {
+      downloadUrl = downloadUrl.replace("/upload/", "/upload/fl_attachment/")
     }
 
     res.json({
