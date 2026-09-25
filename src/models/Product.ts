@@ -21,6 +21,7 @@ export interface IProduct extends Document {
   reviews?: number
   isFeatured?: boolean
   inStock?: boolean
+  isBlocked?: boolean
   createdAt: Date
   updatedAt: Date
 }
@@ -116,6 +117,10 @@ const productSchema = new Schema<IProduct>(
     inStock: {
       type: Boolean,
       default: true
+    },
+    isBlocked: {
+      type: Boolean,
+      default: false
     }
   },
   { timestamps: true }

@@ -24,18 +24,33 @@ export const createProduct = async (req: Request, res: Response) => {
       reviews,
       isFeatured,
       inStock,
+      isBlocked,
       fileUrl: bodyFileUrl,
       questionPaperUrl: bodyQuestionPaperUrl,
       questionPageUrl: bodyQuestionPageUrl,
       questionPaper: bodyQuestionPaper,
-      questionPdf: bodyQuestionPdf
+      questionPdf: bodyQuestionPdf,
+      image: bodyImage
     } = req.body
 
-    if (!category) {
+    if (!category || category === "null" || category === "undefined" || category === "") {
       return res.status(400).json({ message: "Category is required" })
     }
 
-    let image = ""
+    const catId = typeof category === "object" && category._id ? category._id : category
+    if (!mongoose.Types.ObjectId.isValid(catId)) {
+      return res.status(400).json({ message: "Invalid Category ID" })
+    }
+
+    let validSubCategory: any = undefined
+    if (subCategory && subCategory !== "null" && subCategory !== "undefined" && subCategory !== "none" && subCategory !== "") {
+      const subCatId = typeof subCategory === "object" && subCategory._id ? subCategory._id : subCategory
+      if (mongoose.Types.ObjectId.isValid(subCatId)) {
+        validSubCategory = subCatId
+      }
+    }
+
+    let image = bodyImage || ""
     let fileUrl = bodyFileUrl || ""
     let questionPaperUrl = bodyQuestionPaperUrl || bodyQuestionPageUrl || bodyQuestionPaper || bodyQuestionPdf || ""
 
@@ -56,27 +71,42 @@ export const createProduct = async (req: Request, res: Response) => {
       image = await uploadToCloudinary(req.file.buffer, "ignoupower/images")
     }
 
+    let normalizedProductType = "assignment"
+    if (productType) {
+      const pt = String(productType).toLowerCase().trim()
+      if (["assignment", "handwritten", "project", "synopsis", "ebook", "guide"].includes(pt)) {
+        normalizedProductType = pt
+      } else if (pt.includes("project") || pt.includes("synopsis")) {
+        normalizedProductType = "project"
+      } else if (pt.includes("handwritten")) {
+        normalizedProductType = "handwritten"
+      } else if (pt.includes("guide") || pt.includes("ebook")) {
+        normalizedProductType = "guide"
+      }
+    }
+
     const product = await Product.create({
-      title,
-      price: Number(price),
-      oldPrice: oldPrice ? Number(oldPrice) : 0,
-      description,
+      title: title || "",
+      price: price !== undefined && price !== "" && !isNaN(Number(price)) ? Number(price) : 0,
+      oldPrice: oldPrice !== undefined && oldPrice !== "" && !isNaN(Number(oldPrice)) ? Number(oldPrice) : 0,
+      description: description || "",
       image,
       fileUrl,
       questionPaperUrl,
       questionPageUrl: questionPaperUrl,
-      category,
-      subCategory: subCategory || undefined,
-      code: code ? code.toUpperCase() : "",
-      year,
-      session,
-      semester,
-      program: program ? program.toUpperCase() : "",
-      productType: productType || "assignment",
-      rating: rating ? Number(rating) : 5,
-      reviews: reviews ? Number(reviews) : 0,
+      category: catId,
+      subCategory: validSubCategory,
+      code: code ? String(code).trim().toUpperCase() : "",
+      year: year ? String(year).trim() : "",
+      session: session ? String(session).trim() : "",
+      semester: semester ? String(semester).trim() : "",
+      program: program ? String(program).trim().toUpperCase() : "",
+      productType: normalizedProductType as any,
+      rating: rating !== undefined && rating !== "" && !isNaN(Number(rating)) ? Number(rating) : 5,
+      reviews: reviews !== undefined && reviews !== "" && !isNaN(Number(reviews)) ? Number(reviews) : 0,
       isFeatured: isFeatured === true || isFeatured === "true",
-      inStock: inStock === undefined || inStock === true || inStock === "true"
+      inStock: inStock === undefined || inStock === true || inStock === "true",
+      isBlocked: isBlocked === true || isBlocked === "true"
     })
 
     const populatedProduct = await Product.findById(product._id)
@@ -84,9 +114,9 @@ export const createProduct = async (req: Request, res: Response) => {
       .populate("subCategory", "name")
 
     res.status(201).json(populatedProduct)
-  } catch (error) {
+  } catch (error: any) {
     console.error("CREATE PRODUCT ERROR:", error)
-    res.status(500).json({ message: "Error creating product" })
+    res.status(500).json({ message: "Error creating product", error: error?.message || "Internal server error" })
   }
 }
 
@@ -174,6 +204,15 @@ export const getProducts = async (req: Request, res: Response) => {
       query.isFeatured = req.query.isFeatured === "true";
     }
 
+    // 8.1 Blocked / Active filter
+    if (req.query.isBlocked !== undefined) {
+      query.isBlocked = req.query.isBlocked === "true";
+    } else if (req.query.status === "blocked") {
+      query.isBlocked = true;
+    } else if (req.query.status === "active") {
+      query.isBlocked = { $ne: true };
+    }
+
     // 9. Price range filters
     if (req.query.minPrice || req.query.maxPrice) {
       query.price = {};
@@ -220,15 +259,15 @@ export const getProducts = async (req: Request, res: Response) => {
         totalPages: Math.ceil(total / limit)
       }
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("GET PRODUCTS ERROR:", error);
-    return res.status(500).json({ message: "Error fetching products" });
+    return res.status(500).json({ message: "Error fetching products", error: error?.message || "Internal server error" });
   }
 }
 
 export const getFeaturedProducts = async (req: Request, res: Response) => {
   try {
-    const products = await Product.find({ isFeatured: true })
+    const products = await Product.find({ isFeatured: true, isBlocked: { $ne: true } })
       .select("-fileUrl")
       .populate("category", "name")
       .populate("subCategory", "name")
@@ -236,29 +275,34 @@ export const getFeaturedProducts = async (req: Request, res: Response) => {
       .sort({ createdAt: -1 });
 
     res.json(products);
-  } catch (error) {
+  } catch (error: any) {
     console.error("GET FEATURED PRODUCTS ERROR:", error);
-    return res.status(500).json({ message: "Error fetching featured products" });
+    return res.status(500).json({ message: "Error fetching featured products", error: error?.message || "Internal server error" });
   }
 }
 
 export const deleteProduct = async (req: Request, res: Response) => {
   try {
-    const product = await Product.findByIdAndDelete(req.params.id)
+    const id = req.params.id as string;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+    const product = await Product.findByIdAndDelete(id)
     if (!product) {
       return res.status(404).json({ message: "Product not found" })
     }
     res.json({
       message: "Product deleted successfully"
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error("DELETE PRODUCT ERROR:", error)
-    return res.status(500).json({ message: "Error deleting product" })
+    return res.status(500).json({ message: "Error deleting product", error: error?.message || "Internal server error" })
   }
 }
 
 export const updateProduct = async (req: Request, res: Response) => {
   try {
+    const id = req.params.id as string;
     const { 
       title, 
       price, 
@@ -276,14 +320,20 @@ export const updateProduct = async (req: Request, res: Response) => {
       reviews,
       isFeatured,
       inStock,
+      isBlocked,
       fileUrl: bodyFileUrl,
       questionPaperUrl: bodyQuestionPaperUrl,
       questionPageUrl: bodyQuestionPageUrl,
       questionPaper: bodyQuestionPaper,
-      questionPdf: bodyQuestionPdf
+      questionPdf: bodyQuestionPdf,
+      image: bodyImage
     } = req.body
 
-    const product = await Product.findById(req.params.id);
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    const product = await Product.findById(id);
     if (!product) {
       return res.status(404).json({ message: "Product not found" });
     }
@@ -314,30 +364,63 @@ export const updateProduct = async (req: Request, res: Response) => {
       }
     } else if (req.file) {
       image = await uploadToCloudinary(req.file.buffer, "ignoupower/images")
+    } else if (bodyImage !== undefined && bodyImage !== "") {
+      image = bodyImage
     }
 
-    product.title = title || product.title
-    if (price !== undefined) product.price = Number(price)
-    if (oldPrice !== undefined) product.oldPrice = Number(oldPrice)
+    if (title !== undefined && title !== "") product.title = title
+    if (price !== undefined && price !== "" && !isNaN(Number(price))) product.price = Number(price)
+    if (oldPrice !== undefined && oldPrice !== "" && !isNaN(Number(oldPrice))) product.oldPrice = Number(oldPrice)
     if (description !== undefined) product.description = description
-    if (category) product.category = category
-    if (subCategory !== undefined) product.subCategory = subCategory || undefined
+    
+    if (category && category !== "null" && category !== "undefined" && category !== "") {
+      const catId = typeof category === "object" && category._id ? category._id : category;
+      if (mongoose.Types.ObjectId.isValid(catId)) {
+        product.category = catId;
+      }
+    }
+
+    if (subCategory !== undefined) {
+      const subCatId = typeof subCategory === "object" && subCategory._id ? subCategory._id : subCategory;
+      if (subCatId && subCatId !== "null" && subCatId !== "undefined" && subCatId !== "none" && subCatId !== "" && mongoose.Types.ObjectId.isValid(subCatId)) {
+        product.subCategory = subCatId;
+      } else {
+        product.set("subCategory", undefined);
+      }
+    }
+
     if (image) product.image = image
     if (fileUrl !== undefined) product.fileUrl = fileUrl
     if (questionPaperUrl !== undefined) {
       product.questionPaperUrl = questionPaperUrl
       product.questionPageUrl = questionPaperUrl
     }
-    if (code !== undefined) product.code = code.toUpperCase()
-    if (year !== undefined) product.year = year
-    if (session !== undefined) product.session = session
-    if (semester !== undefined) product.semester = semester
-    if (program !== undefined) product.program = program.toUpperCase()
-    if (productType !== undefined) product.productType = productType
-    if (rating !== undefined) product.rating = Number(rating)
-    if (reviews !== undefined) product.reviews = Number(reviews)
+    if (code !== undefined) product.code = String(code).trim().toUpperCase()
+    if (year !== undefined) product.year = String(year).trim()
+    if (session !== undefined) product.session = String(session).trim()
+    if (semester !== undefined) product.semester = String(semester).trim()
+    if (program !== undefined) product.program = String(program).trim().toUpperCase()
+    
+    if (productType !== undefined && productType !== "") {
+      const pt = String(productType).toLowerCase().trim()
+      if (["assignment", "handwritten", "project", "synopsis", "ebook", "guide"].includes(pt)) {
+        product.productType = pt as any
+      } else if (pt.includes("project") || pt.includes("synopsis")) {
+        product.productType = "project"
+      } else if (pt.includes("handwritten")) {
+        product.productType = "handwritten"
+      } else if (pt.includes("guide") || pt.includes("ebook")) {
+        product.productType = "guide"
+      } else {
+        product.productType = "assignment"
+      }
+    }
+
+    if (rating !== undefined && rating !== "" && !isNaN(Number(rating))) product.rating = Number(rating)
+    if (reviews !== undefined && reviews !== "" && !isNaN(Number(reviews))) product.reviews = Number(reviews)
     if (isFeatured !== undefined) product.isFeatured = isFeatured === true || isFeatured === "true"
     if (inStock !== undefined) product.inStock = inStock === true || inStock === "true"
+    if (isBlocked !== undefined) product.isBlocked = isBlocked === true || isBlocked === "true"
 
     await product.save();
     
@@ -346,15 +429,54 @@ export const updateProduct = async (req: Request, res: Response) => {
       .populate("subCategory", "name")
 
     res.json(updated);
-  } catch (error) {
+  } catch (error: any) {
     console.error("UPDATE PRODUCT ERROR:", error)
-    return res.status(500).json({ message: "Error updating product" })
+    return res.status(500).json({ message: "Error updating product", error: error?.message || "Internal server error" })
+  }
+}
+
+export const toggleBlockProduct = async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    const product = await Product.findById(id);
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    if (req.body && req.body.isBlocked !== undefined) {
+      product.isBlocked = req.body.isBlocked === true || req.body.isBlocked === "true";
+    } else {
+      product.isBlocked = !product.isBlocked;
+    }
+
+    await product.save();
+
+    const populatedProduct = await Product.findById(product._id)
+      .populate("category", "name")
+      .populate("subCategory", "name");
+
+    res.json({
+      message: product.isBlocked ? "Product blocked successfully" : "Product unblocked (activated) successfully",
+      isBlocked: product.isBlocked,
+      data: populatedProduct
+    });
+  } catch (error: any) {
+    console.error("TOGGLE BLOCK PRODUCT ERROR:", error);
+    return res.status(500).json({ message: "Error toggling product block status", error: error?.message || "Internal server error" });
   }
 }
 
 export const getSingleProduct = async (req: Request, res: Response) => {
   try {
-    const product = await Product.findById(req.params.id)
+    const id = req.params.id as string;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+    const product = await Product.findById(id)
       .select("-fileUrl")
       .populate("category", "name")
       .populate("subCategory", "name")
@@ -363,9 +485,9 @@ export const getSingleProduct = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Product not found" });
     }
     res.json(product);
-  } catch (error) {
+  } catch (error: any) {
     console.error("GET SINGLE PRODUCT ERROR:", error)
-    return res.status(500).json({ message: "Error fetching product" })
+    return res.status(500).json({ message: "Error fetching product", error: error?.message || "Internal server error" })
   }
 }
 

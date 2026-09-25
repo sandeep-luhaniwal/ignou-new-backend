@@ -5,6 +5,7 @@ import {
   getFeaturedProducts,
   deleteProduct,
   updateProduct,
+  toggleBlockProduct,
   getSingleProduct
 } from "../controllers/productController"
 
@@ -36,6 +37,9 @@ router.get("/:id", getSingleProduct)
 // Admin protected routes
 router.post("/", protect, adminOnly, productUpload, createProduct)
 router.put("/:id", protect, adminOnly, productUpload, updateProduct)
+router.patch("/:id/toggle-block", protect, adminOnly, toggleBlockProduct)
+router.put("/:id/toggle-block", protect, adminOnly, toggleBlockProduct)
+router.patch("/:id/block", protect, adminOnly, toggleBlockProduct)
 router.delete("/:id", protect, adminOnly, deleteProduct)
 
 export default router
