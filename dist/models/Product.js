@@ -37,17 +37,37 @@ const mongoose_1 = __importStar(require("mongoose"));
 const productSchema = new mongoose_1.Schema({
     title: {
         type: String,
-        required: true
+        required: true,
+        trim: true
     },
     price: {
         type: Number,
         required: true
     },
     oldPrice: {
-        type: Number
+        type: Number,
+        default: 0
     },
-    description: String,
-    image: String,
+    description: {
+        type: String,
+        default: ""
+    },
+    image: {
+        type: String,
+        default: ""
+    },
+    fileUrl: {
+        type: String,
+        default: ""
+    },
+    questionPaperUrl: {
+        type: String,
+        default: ""
+    },
+    questionPageUrl: {
+        type: String,
+        default: ""
+    },
     category: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: "Category",
@@ -59,11 +79,35 @@ const productSchema = new mongoose_1.Schema({
     },
     code: {
         type: String,
-        trim: true
+        trim: true,
+        uppercase: true,
+        default: ""
     },
     year: {
         type: String,
-        trim: true
+        trim: true,
+        default: ""
+    },
+    session: {
+        type: String,
+        trim: true,
+        default: ""
+    },
+    semester: {
+        type: String,
+        trim: true,
+        default: ""
+    },
+    program: {
+        type: String,
+        trim: true,
+        uppercase: true,
+        default: ""
+    },
+    productType: {
+        type: String,
+        enum: ["assignment", "handwritten", "project", "synopsis", "ebook", "guide"],
+        default: "assignment"
     },
     rating: {
         type: Number,
@@ -72,6 +116,18 @@ const productSchema = new mongoose_1.Schema({
     reviews: {
         type: Number,
         default: 0
+    },
+    isFeatured: {
+        type: Boolean,
+        default: false
+    },
+    inStock: {
+        type: Boolean,
+        default: true
+    },
+    isBlocked: {
+        type: Boolean,
+        default: false
     }
 }, { timestamps: true });
 exports.default = mongoose_1.default.model("Product", productSchema);

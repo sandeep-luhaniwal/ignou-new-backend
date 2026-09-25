@@ -14,7 +14,7 @@ const sendEmail = async ({ to, subject, html }) => {
         }
     });
     const mailOptions = {
-        from: `"IGNOU Portal" <${process.env.GMAIL_USER}>`,
+        from: `"IGNOUPower" <${process.env.GMAIL_USER}>`,
         to,
         subject,
         html

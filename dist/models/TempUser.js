@@ -34,39 +34,44 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const querySchema = new mongoose_1.Schema({
+const tempUserSchema = new mongoose_1.Schema({
     name: {
         type: String,
-        required: true,
-        trim: true
+        required: true
     },
     email: {
         type: String,
         required: true,
-        trim: true,
-        lowercase: true
+        unique: true
     },
-    phone: {
-        type: String,
-        default: ""
-    },
-    type: {
-        type: String,
-        enum: ["contact", "admission", "project", "assignment", "general"],
-        default: "contact"
-    },
-    message: {
+    password: {
         type: String,
         required: true
     },
-    status: {
+    role: {
         type: String,
-        enum: ["Pending", "In Progress", "Resolved"],
-        default: "Pending"
+        default: "user"
     },
-    adminReply: {
+    enrolmentNo: {
         type: String,
         default: ""
+    },
+    program: {
+        type: String,
+        default: ""
+    },
+    session: {
+        type: String,
+        default: ""
+    },
+    otp: {
+        type: String,
+        required: true
+    },
+    createdAt: {
+        type: Date,
+        default: Date.now,
+        index: { expires: 300 } // Automatically expires and gets deleted after 5 minutes (300 seconds)
     }
-}, { timestamps: true });
-exports.default = mongoose_1.default.model("Query", querySchema);
+});
+exports.default = mongoose_1.default.model("TempUser", tempUserSchema);

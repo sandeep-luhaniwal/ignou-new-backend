@@ -17,10 +17,15 @@ import { getFilterOptions } from "../controllers/categoryController"
 
 const router = express.Router()
 
-// Multer upload config for image, solved file, and question paper fields
+// Multer upload config for image, solved file, and sample/question paper fields
 const productUpload = upload.fields([
   { name: "image", maxCount: 1 },
   { name: "file", maxCount: 1 },
+  { name: "assignmentPage", maxCount: 1 },
+  { name: "assignment_page", maxCount: 1 },
+  { name: "samplePage", maxCount: 1 },
+  { name: "samplePdf", maxCount: 1 },
+  { name: "sampleFile", maxCount: 1 },
   { name: "questionPaper", maxCount: 1 },
   { name: "questionPage", maxCount: 1 },
   { name: "questionPdf", maxCount: 1 },

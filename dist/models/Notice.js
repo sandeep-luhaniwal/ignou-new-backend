@@ -34,39 +34,36 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const querySchema = new mongoose_1.Schema({
-    name: {
+const noticeSchema = new mongoose_1.Schema({
+    title: {
         type: String,
         required: true,
         trim: true
     },
-    email: {
-        type: String,
-        required: true,
-        trim: true,
-        lowercase: true
-    },
-    phone: {
+    description: {
         type: String,
         default: ""
     },
-    type: {
-        type: String,
-        enum: ["contact", "admission", "project", "assignment", "general"],
-        default: "contact"
-    },
-    message: {
-        type: String,
-        required: true
-    },
-    status: {
-        type: String,
-        enum: ["Pending", "In Progress", "Resolved"],
-        default: "Pending"
-    },
-    adminReply: {
+    link: {
         type: String,
         default: ""
+    },
+    category: {
+        type: String,
+        enum: ["exam", "admission", "assignment", "result", "general"],
+        default: "general"
+    },
+    isImportant: {
+        type: Boolean,
+        default: false
+    },
+    isActive: {
+        type: Boolean,
+        default: true
+    },
+    publishDate: {
+        type: Date,
+        default: Date.now
     }
 }, { timestamps: true });
-exports.default = mongoose_1.default.model("Query", querySchema);
+exports.default = mongoose_1.default.model("Notice", noticeSchema);

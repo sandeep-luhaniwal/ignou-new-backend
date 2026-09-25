@@ -33,10 +33,25 @@ exports.createComment = createComment;
 const getComments = async (req, res) => {
     try {
         const { productId } = req.params;
-        const comments = await commentModel_1.default.find({ product: productId })
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+        const query = { product: productId };
+        const total = await commentModel_1.default.countDocuments(query);
+        const comments = await commentModel_1.default.find(query)
             .populate("user", "name email")
+            .skip(skip)
+            .limit(limit)
             .sort({ createdAt: -1 });
-        res.json(comments);
+        res.json({
+            data: comments,
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit)
+            }
+        });
     }
     catch (error) {
         console.log("GET COMMENTS ERROR:", error);

@@ -14,6 +14,9 @@ const protect = async (req, res, next) => {
             token = req.headers.authorization.split(' ')[1];
             const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET);
             req.user = await User_1.default.findById(decoded.id).select('-password');
+            if (!req.user) {
+                return res.status(401).json({ message: "User not found or token invalid" });
+            }
             next();
         }
         catch (error) {

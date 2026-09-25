@@ -63,7 +63,17 @@ export const createProduct = async (req: Request, res: Response) => {
       if (files["file"] && files["file"][0]) {
         fileUrl = await uploadToCloudinary(files["file"][0].buffer, "ignoupower/files")
       }
-      const qFile = files["questionPaper"]?.[0] || files["questionPage"]?.[0] || files["questionPdf"]?.[0] || files["questionPaperPdf"]?.[0] || files["questionFile"]?.[0]
+      const qFile = 
+        files["assignmentPage"]?.[0] || 
+        files["assignment_page"]?.[0] || 
+        files["samplePage"]?.[0] || 
+        files["samplePdf"]?.[0] || 
+        files["sampleFile"]?.[0] || 
+        files["questionPaper"]?.[0] || 
+        files["questionPage"]?.[0] || 
+        files["questionPdf"]?.[0] || 
+        files["questionPaperPdf"]?.[0] || 
+        files["questionFile"]?.[0]
       if (qFile) {
         questionPaperUrl = await uploadToCloudinary(qFile.buffer, "ignoupower/question_papers")
       }
@@ -358,7 +368,17 @@ export const updateProduct = async (req: Request, res: Response) => {
       if (files["file"] && files["file"][0]) {
         fileUrl = await uploadToCloudinary(files["file"][0].buffer, "ignoupower/files")
       }
-      const qFile = files["questionPaper"]?.[0] || files["questionPage"]?.[0] || files["questionPdf"]?.[0] || files["questionPaperPdf"]?.[0] || files["questionFile"]?.[0]
+      const qFile = 
+        files["assignmentPage"]?.[0] || 
+        files["assignment_page"]?.[0] || 
+        files["samplePage"]?.[0] || 
+        files["samplePdf"]?.[0] || 
+        files["sampleFile"]?.[0] || 
+        files["questionPaper"]?.[0] || 
+        files["questionPage"]?.[0] || 
+        files["questionPdf"]?.[0] || 
+        files["questionPaperPdf"]?.[0] || 
+        files["questionFile"]?.[0]
       if (qFile) {
         questionPaperUrl = await uploadToCloudinary(qFile.buffer, "ignoupower/question_papers")
       }

@@ -34,39 +34,50 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const querySchema = new mongoose_1.Schema({
-    name: {
+const promoCodeSchema = new mongoose_1.Schema({
+    code: {
         type: String,
         required: true,
-        trim: true
-    },
-    email: {
-        type: String,
-        required: true,
+        unique: true,
         trim: true,
-        lowercase: true
+        uppercase: true
     },
-    phone: {
+    description: {
         type: String,
         default: ""
     },
-    type: {
+    discountType: {
         type: String,
-        enum: ["contact", "admission", "project", "assignment", "general"],
-        default: "contact"
+        enum: ["percentage", "flat"],
+        default: "percentage"
     },
-    message: {
-        type: String,
-        required: true
+    discountValue: {
+        type: Number,
+        required: true,
+        default: 10
     },
-    status: {
-        type: String,
-        enum: ["Pending", "In Progress", "Resolved"],
-        default: "Pending"
+    minOrderAmount: {
+        type: Number,
+        default: 0
     },
-    adminReply: {
-        type: String,
-        default: ""
+    maxDiscount: {
+        type: Number,
+        default: 0 // 0 means no cap
+    },
+    isActive: {
+        type: Boolean,
+        default: true
+    },
+    usageLimit: {
+        type: Number,
+        default: 0 // 0 means unlimited
+    },
+    usedCount: {
+        type: Number,
+        default: 0
+    },
+    expiresAt: {
+        type: Date
     }
 }, { timestamps: true });
-exports.default = mongoose_1.default.model("Query", querySchema);
+exports.default = mongoose_1.default.model("PromoCode", promoCodeSchema);

@@ -49,56 +49,73 @@ const orderSchema = new mongoose_1.Schema({
             },
             code: {
                 type: String,
-                required: true
+                default: ""
             },
             title: {
                 type: String,
-                required: true
+                default: ""
             },
             price: {
                 type: Number,
-                required: true
+                default: 0
             },
             quantity: {
                 type: Number,
-                required: true,
                 default: 1
+            },
+            session: {
+                type: String,
+                default: ""
+            },
+            fileUrl: {
+                type: String,
+                default: ""
             }
         }
     ],
     deliveryType: {
         type: String,
         enum: ["PDF", "Handwritten"],
-        required: true
+        default: "PDF"
     },
     shippingAddress: {
         name: String,
         phone: String,
         address: String,
-        pincode: String
+        pincode: String,
+        city: String,
+        state: String,
+        district: String
     },
     subtotal: {
         type: Number,
-        required: true
+        default: 0
     },
     shippingFee: {
         type: Number,
-        required: true,
         default: 0
     },
     discount: {
         type: Number,
-        required: true,
         default: 0
     },
     grandTotal: {
         type: Number,
-        required: true
+        default: 0
+    },
+    appliedPromo: {
+        type: String,
+        default: ""
     },
     paymentStatus: {
         type: String,
-        enum: ["Pending", "Paid", "Failed"],
+        enum: ["Pending", "Paid", "Failed", "Refunded"],
         default: "Pending"
+    },
+    orderStatus: {
+        type: String,
+        enum: ["Processing", "Dispatched", "Delivered", "Completed", "Cancelled"],
+        default: "Processing"
     },
     razorpayOrderId: {
         type: String
@@ -108,6 +125,34 @@ const orderSchema = new mongoose_1.Schema({
     },
     razorpaySignature: {
         type: String
+    },
+    refundId: {
+        type: String,
+        default: ""
+    },
+    refundAmount: {
+        type: Number,
+        default: 0
+    },
+    cancellationReason: {
+        type: String,
+        default: ""
+    },
+    previewImages: {
+        type: [String],
+        default: []
+    },
+    trackingNumber: {
+        type: String,
+        default: ""
+    },
+    courierName: {
+        type: String,
+        default: ""
+    },
+    adminNotes: {
+        type: String,
+        default: ""
     }
 }, { timestamps: true });
 exports.default = mongoose_1.default.model("Order", orderSchema);

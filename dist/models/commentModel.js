@@ -21,7 +21,8 @@ const commentSchema = new mongoose_1.default.Schema({
     },
     role: {
         type: String,
-        enum: ["admin", "client"],
+        enum: ["admin", "user", "client"],
+        default: "user",
         required: true
     }
 }, { timestamps: true });
