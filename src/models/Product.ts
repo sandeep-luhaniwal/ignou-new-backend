@@ -4,6 +4,11 @@ export interface IProduct extends Document {
   title: string
   price: number
   oldPrice?: number
+  pdfPrice?: number
+  pdfOldPrice?: number
+  handwrittenPrice?: number
+  handwrittenOldPrice?: number
+  deliveryCharge?: number
   description?: string
   image?: string
   fileUrl?: string
@@ -38,6 +43,26 @@ const productSchema = new Schema<IProduct>(
       required: true
     },
     oldPrice: {
+      type: Number,
+      default: 0
+    },
+    pdfPrice: {
+      type: Number,
+      default: 0
+    },
+    pdfOldPrice: {
+      type: Number,
+      default: 0
+    },
+    handwrittenPrice: {
+      type: Number,
+      default: 0
+    },
+    handwrittenOldPrice: {
+      type: Number,
+      default: 0
+    },
+    deliveryCharge: {
       type: Number,
       default: 0
     },

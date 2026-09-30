@@ -28,6 +28,10 @@ router.get("/:id", getSingleCategory)
 // Protected / Admin endpoints
 router.post("/create", protect, adminOnly, createCategory)
 router.post("/sub-create", protect, adminOnly, createSubCategory)
+router.put("/sub/:id", protect, adminOnly, updateCategory)
+router.delete("/sub/:id", protect, adminOnly, deleteCategory)
+router.put("/subcategory/:id", protect, adminOnly, updateCategory)
+router.delete("/subcategory/:id", protect, adminOnly, deleteCategory)
 router.put("/:id", protect, adminOnly, updateCategory)
 router.delete("/:id", protect, adminOnly, deleteCategory)
 

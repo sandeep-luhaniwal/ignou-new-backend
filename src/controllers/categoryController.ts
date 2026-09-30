@@ -215,7 +215,7 @@ export const getSingleCategory = async (req: Request, res: Response) => {
 export const updateCategory = async (req: Request, res: Response) => {
     try {
         const { name } = req.body
-        if (!name) {
+        if (!name || !name.trim()) {
             return res.status(400).json({ message: "Name is required" })
         }
 
@@ -224,11 +224,25 @@ export const updateCategory = async (req: Request, res: Response) => {
             return res.status(404).json({ message: "Category not found" })
         }
 
-        category.name = name.toLowerCase().trim()
+        const trimmedName = name.toLowerCase().trim()
+        const existing = await Category.findOne({
+            _id: { $ne: category._id },
+            parent: category.parent || null,
+            name: trimmedName
+        })
+
+        if (existing) {
+            return res.status(400).json({
+                message: category.parent ? "SubCategory already exists with this name" : "Category already exists with this name"
+            })
+        }
+
+        category.name = trimmedName
         await category.save()
 
         res.json({
             message: "Category updated successfully",
+            data: category,
             category
         })
     } catch (error) {

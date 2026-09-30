@@ -19,6 +19,10 @@ router.get("/:id", categoryController_1.getSingleCategory);
 // Protected / Admin endpoints
 router.post("/create", authMiddleware_1.protect, adminMiddleware_1.adminOnly, categoryController_1.createCategory);
 router.post("/sub-create", authMiddleware_1.protect, adminMiddleware_1.adminOnly, categoryController_1.createSubCategory);
+router.put("/sub/:id", authMiddleware_1.protect, adminMiddleware_1.adminOnly, categoryController_1.updateCategory);
+router.delete("/sub/:id", authMiddleware_1.protect, adminMiddleware_1.adminOnly, categoryController_1.deleteCategory);
+router.put("/subcategory/:id", authMiddleware_1.protect, adminMiddleware_1.adminOnly, categoryController_1.updateCategory);
+router.delete("/subcategory/:id", authMiddleware_1.protect, adminMiddleware_1.adminOnly, categoryController_1.deleteCategory);
 router.put("/:id", authMiddleware_1.protect, adminMiddleware_1.adminOnly, categoryController_1.updateCategory);
 router.delete("/:id", authMiddleware_1.protect, adminMiddleware_1.adminOnly, categoryController_1.deleteCategory);
 exports.default = router;

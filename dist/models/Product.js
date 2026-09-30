@@ -48,6 +48,26 @@ const productSchema = new mongoose_1.Schema({
         type: Number,
         default: 0
     },
+    pdfPrice: {
+        type: Number,
+        default: 0
+    },
+    pdfOldPrice: {
+        type: Number,
+        default: 0
+    },
+    handwrittenPrice: {
+        type: Number,
+        default: 0
+    },
+    handwrittenOldPrice: {
+        type: Number,
+        default: 0
+    },
+    deliveryCharge: {
+        type: Number,
+        default: 0
+    },
     description: {
         type: String,
         default: ""

@@ -2,6 +2,7 @@ import express from "express"
 import { 
     createOrder, 
     validatePromo,
+    calculateShippingQuote,
     getOrders, 
     getOrderById, 
     verifyPayment,
@@ -19,8 +20,9 @@ import { upload } from "../config/multer"
 
 const router = express.Router()
 
-// Promo code verification route (Public / Authenticated)
+// Promo code & shipping calculation routes (Public / Authenticated)
 router.post("/validate-promo", validatePromo)
+router.post("/calculate-shipping", calculateShippingQuote)
 
 // Student routes
 router.post("/", protect, createOrder)

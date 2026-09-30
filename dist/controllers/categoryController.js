@@ -247,17 +247,29 @@ exports.getSingleCategory = getSingleCategory;
 const updateCategory = async (req, res) => {
     try {
         const { name } = req.body;
-        if (!name) {
+        if (!name || !name.trim()) {
             return res.status(400).json({ message: "Name is required" });
         }
         const category = await Category_1.default.findById(req.params.id);
         if (!category) {
             return res.status(404).json({ message: "Category not found" });
         }
-        category.name = name.toLowerCase().trim();
+        const trimmedName = name.toLowerCase().trim();
+        const existing = await Category_1.default.findOne({
+            _id: { $ne: category._id },
+            parent: category.parent || null,
+            name: trimmedName
+        });
+        if (existing) {
+            return res.status(400).json({
+                message: category.parent ? "SubCategory already exists with this name" : "Category already exists with this name"
+            });
+        }
+        category.name = trimmedName;
         await category.save();
         res.json({
             message: "Category updated successfully",
+            data: category,
             category
         });
     }

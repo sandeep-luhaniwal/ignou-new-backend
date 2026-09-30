@@ -9,8 +9,9 @@ const authMiddleware_1 = require("../middleware/authMiddleware");
 const adminMiddleware_1 = require("../middleware/adminMiddleware");
 const multer_1 = require("../config/multer");
 const router = express_1.default.Router();
-// Promo code verification route (Public / Authenticated)
+// Promo code & shipping calculation routes (Public / Authenticated)
 router.post("/validate-promo", orderController_1.validatePromo);
+router.post("/calculate-shipping", orderController_1.calculateShippingQuote);
 // Student routes
 router.post("/", authMiddleware_1.protect, orderController_1.createOrder);
 router.post("/verify", authMiddleware_1.protect, orderController_1.verifyPayment);

@@ -106,6 +106,47 @@ export const validatePromo = async (req: Request | AuthRequest, res: Response) =
   }
 }
 
+// Helper to calculate courier charges based on weight & quantity slabs
+export const calculateHandwrittenShippingFee = (totalQuantity: number, customFee?: number): number => {
+  if (customFee !== undefined && !isNaN(Number(customFee)) && Number(customFee) > 0) {
+    return Number(customFee)
+  }
+  if (totalQuantity <= 0) return 0
+  if (totalQuantity <= 2) return 60    // 1-2 items (~200-450g) = ₹60
+  if (totalQuantity <= 5) return 100   // 3-5 items (~450-900g, within 1kg) = ₹100
+  const extraItems = totalQuantity - 5
+  const extraSlabs = Math.ceil(extraItems / 5)
+  return 100 + (extraSlabs * 50)       // >5 items: +₹50 per 5 items (additional 500g-1kg)
+}
+
+export const calculateShippingQuote = async (req: Request | AuthRequest, res: Response) => {
+  try {
+    const { quantity, deliveryType, items, customFee } = req.body
+    const isHandwritten = String(deliveryType || "").toLowerCase() === "handwritten"
+    
+    if (!isHandwritten) {
+      return res.json({ deliveryType: "PDF", shippingFee: 0, message: "Free digital delivery for PDF" })
+    }
+
+    let totalQty = Number(quantity) || 0
+    if (items && Array.isArray(items)) {
+      totalQty = items.reduce((acc: number, it: any) => acc + (Number(it.quantity) || 1), 0)
+    }
+    if (totalQty <= 0) totalQty = 1
+
+    const fee = calculateHandwrittenShippingFee(totalQty, Number(customFee))
+    return res.json({
+      deliveryType: "Handwritten",
+      quantity: totalQty,
+      shippingFee: fee,
+      weightDescription: totalQty <= 2 ? "200-450g" : (totalQty <= 5 ? "450-900g (under 1kg)" : `${Math.round(totalQty * 0.2)}kg`),
+      message: `Courier fee calculated: ₹${fee}`
+    })
+  } catch (error: any) {
+    res.status(500).json({ message: "Error calculating shipping fee", error: error?.message })
+  }
+}
+
 export const createOrder = async (req: AuthRequest, res: Response) => {
   try {
     const { items, deliveryType, shippingAddress, subtotal, shippingFee, discount, grandTotal, appliedPromo, promoCode } = req.body
@@ -138,11 +179,17 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           }
         }
 
+        const effectivePrice = (item.price !== undefined && item.price !== "" && !isNaN(Number(item.price)) && Number(item.price) > 0)
+          ? Number(item.price)
+          : (isHandwrittenOrder 
+              ? (productDoc?.handwrittenPrice || productDoc?.price || 0)
+              : (productDoc?.pdfPrice || productDoc?.price || 0))
+
         return {
           product: productId,
           code: item.code || productDoc?.code || "N/A",
           title: item.title || productDoc?.title || item.code || "Item",
-          price: Number(item.price) || productDoc?.price || 0,
+          price: effectivePrice,
           quantity: Number(item.quantity) || 1,
           session: item.session || productDoc?.session || "",
           fileUrl: isHandwrittenOrder ? "" : (item.fileUrl || productDoc?.fileUrl || "")
@@ -196,8 +243,9 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const totalQuantity = orderItems.reduce((acc, it) => acc + (it.quantity || 1), 0)
     const calculatedShippingFee = isHandwrittenOrder 
-      ? (Number(shippingFee) > 0 ? Number(shippingFee) : orderItems.reduce((acc, it) => acc + (60 * it.quantity), 0))
+      ? calculateHandwrittenShippingFee(totalQuantity, Number(shippingFee))
       : 0
 
     // Ensure grandTotal accurately reflects the reduced balance after discount
@@ -299,10 +347,11 @@ export const getOrders = async (req: AuthRequest, res: Response) => {
 
     const orders = await orderQuery
 
-    // Hide fileUrl for unpaid orders or handwritten orders (unless admin)
+    // Strictly hide fileUrl for ALL unpaid orders or handwritten orders
     const sanitizedOrders = orders.map((orderDoc) => {
       const orderObj = orderDoc.toObject()
-      if ((orderObj.paymentStatus !== "Paid" || orderObj.deliveryType === "Handwritten") && !isAdmin) {
+      const isPaid = String(orderObj.paymentStatus || "").toLowerCase() === "paid"
+      if (!isPaid || orderObj.deliveryType === "Handwritten") {
         orderObj.items = orderObj.items.map((i: any) => ({
           ...i,
           fileUrl: undefined,
@@ -344,8 +393,9 @@ export const getOrderById = async (req: AuthRequest, res: Response) => {
     }
 
     const orderObj = order.toObject()
-    // If not paid and not admin, or if handwritten delivery for normal user, hide fileUrl
-    if ((orderObj.paymentStatus !== "Paid" || orderObj.deliveryType === "Handwritten") && req.user.role !== "admin") {
+    // Strictly hide fileUrl for ALL unpaid orders or handwritten orders
+    const isPaid = String(orderObj.paymentStatus || "").toLowerCase() === "paid"
+    if (!isPaid || orderObj.deliveryType === "Handwritten") {
       orderObj.items = orderObj.items.map((i: any) => ({
         ...i,
         fileUrl: undefined,

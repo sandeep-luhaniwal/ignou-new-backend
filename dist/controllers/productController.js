@@ -11,7 +11,7 @@ const apiFeatures_1 = require("../utils/apiFeatures");
 const cloudinary_1 = require("../utils/cloudinary");
 const createProduct = async (req, res) => {
     try {
-        const { title, price, oldPrice, description, category, subCategory, code, year, session, semester, program, productType, rating, reviews, isFeatured, inStock, isBlocked, fileUrl: bodyFileUrl, questionPaperUrl: bodyQuestionPaperUrl, questionPageUrl: bodyQuestionPageUrl, questionPaper: bodyQuestionPaper, questionPdf: bodyQuestionPdf, image: bodyImage } = req.body;
+        const { title, price, oldPrice, pdfPrice, pdfOldPrice, handwrittenPrice, handwrittenOldPrice, deliveryCharge, deliveryCharges, courierCharge, description, category, subCategory, code, year, session, semester, program, productType, rating, reviews, isFeatured, inStock, isBlocked, fileUrl: bodyFileUrl, questionPaperUrl: bodyQuestionPaperUrl, questionPageUrl: bodyQuestionPageUrl, questionPaper: bodyQuestionPaper, questionPdf: bodyQuestionPdf, image: bodyImage } = req.body;
         if (!category || category === "null" || category === "undefined" || category === "") {
             return res.status(400).json({ message: "Category is required" });
         }
@@ -71,10 +71,32 @@ const createProduct = async (req, res) => {
                 normalizedProductType = "guide";
             }
         }
+        const effectivePdfPrice = pdfPrice !== undefined && pdfPrice !== "" && !isNaN(Number(pdfPrice))
+            ? Number(pdfPrice)
+            : (price !== undefined && price !== "" && !isNaN(Number(price)) ? Number(price) : 0);
+        const effectivePdfOldPrice = pdfOldPrice !== undefined && pdfOldPrice !== "" && !isNaN(Number(pdfOldPrice))
+            ? Number(pdfOldPrice)
+            : (oldPrice !== undefined && oldPrice !== "" && !isNaN(Number(oldPrice)) ? Number(oldPrice) : 0);
+        const effectiveHandwrittenPrice = handwrittenPrice !== undefined && handwrittenPrice !== "" && !isNaN(Number(handwrittenPrice))
+            ? Number(handwrittenPrice)
+            : 0;
+        const effectiveHandwrittenOldPrice = handwrittenOldPrice !== undefined && handwrittenOldPrice !== "" && !isNaN(Number(handwrittenOldPrice))
+            ? Number(handwrittenOldPrice)
+            : 0;
+        const effectiveDeliveryCharge = deliveryCharge !== undefined && deliveryCharge !== "" && !isNaN(Number(deliveryCharge))
+            ? Number(deliveryCharge)
+            : (deliveryCharges !== undefined && deliveryCharges !== "" && !isNaN(Number(deliveryCharges))
+                ? Number(deliveryCharges)
+                : (courierCharge !== undefined && courierCharge !== "" && !isNaN(Number(courierCharge)) ? Number(courierCharge) : 0));
         const product = await Product_1.default.create({
             title: title || "",
-            price: price !== undefined && price !== "" && !isNaN(Number(price)) ? Number(price) : 0,
-            oldPrice: oldPrice !== undefined && oldPrice !== "" && !isNaN(Number(oldPrice)) ? Number(oldPrice) : 0,
+            price: effectivePdfPrice,
+            oldPrice: effectivePdfOldPrice,
+            pdfPrice: effectivePdfPrice,
+            pdfOldPrice: effectivePdfOldPrice,
+            handwrittenPrice: effectiveHandwrittenPrice,
+            handwrittenOldPrice: effectiveHandwrittenOldPrice,
+            deliveryCharge: effectiveDeliveryCharge,
             description: description || "",
             image,
             fileUrl,
@@ -283,7 +305,7 @@ exports.deleteProduct = deleteProduct;
 const updateProduct = async (req, res) => {
     try {
         const id = req.params.id;
-        const { title, price, oldPrice, description, category, subCategory, code, year, session, semester, program, productType, rating, reviews, isFeatured, inStock, isBlocked, fileUrl: bodyFileUrl, questionPaperUrl: bodyQuestionPaperUrl, questionPageUrl: bodyQuestionPageUrl, questionPaper: bodyQuestionPaper, questionPdf: bodyQuestionPdf, image: bodyImage } = req.body;
+        const { title, price, oldPrice, pdfPrice, pdfOldPrice, handwrittenPrice, handwrittenOldPrice, deliveryCharge, deliveryCharges, courierCharge, description, category, subCategory, code, year, session, semester, program, productType, rating, reviews, isFeatured, inStock, isBlocked, fileUrl: bodyFileUrl, questionPaperUrl: bodyQuestionPaperUrl, questionPageUrl: bodyQuestionPageUrl, questionPaper: bodyQuestionPaper, questionPdf: bodyQuestionPdf, image: bodyImage } = req.body;
         if (!id || !mongoose_1.default.Types.ObjectId.isValid(id)) {
             return res.status(404).json({ message: "Product not found" });
         }
@@ -332,10 +354,34 @@ const updateProduct = async (req, res) => {
         }
         if (title !== undefined && title !== "")
             product.title = title;
-        if (price !== undefined && price !== "" && !isNaN(Number(price)))
+        if (pdfPrice !== undefined && pdfPrice !== "" && !isNaN(Number(pdfPrice))) {
+            product.pdfPrice = Number(pdfPrice);
+            product.price = Number(pdfPrice);
+        }
+        else if (price !== undefined && price !== "" && !isNaN(Number(price))) {
             product.price = Number(price);
-        if (oldPrice !== undefined && oldPrice !== "" && !isNaN(Number(oldPrice)))
+            if (product.pdfPrice === undefined || product.pdfPrice === 0)
+                product.pdfPrice = Number(price);
+        }
+        if (pdfOldPrice !== undefined && pdfOldPrice !== "" && !isNaN(Number(pdfOldPrice))) {
+            product.pdfOldPrice = Number(pdfOldPrice);
+            product.oldPrice = Number(pdfOldPrice);
+        }
+        else if (oldPrice !== undefined && oldPrice !== "" && !isNaN(Number(oldPrice))) {
             product.oldPrice = Number(oldPrice);
+            if (product.pdfOldPrice === undefined || product.pdfOldPrice === 0)
+                product.pdfOldPrice = Number(oldPrice);
+        }
+        if (handwrittenPrice !== undefined && handwrittenPrice !== "" && !isNaN(Number(handwrittenPrice))) {
+            product.handwrittenPrice = Number(handwrittenPrice);
+        }
+        if (handwrittenOldPrice !== undefined && handwrittenOldPrice !== "" && !isNaN(Number(handwrittenOldPrice))) {
+            product.handwrittenOldPrice = Number(handwrittenOldPrice);
+        }
+        const incomingDeliveryCharge = deliveryCharge ?? deliveryCharges ?? courierCharge;
+        if (incomingDeliveryCharge !== undefined && incomingDeliveryCharge !== "" && !isNaN(Number(incomingDeliveryCharge))) {
+            product.deliveryCharge = Number(incomingDeliveryCharge);
+        }
         if (description !== undefined)
             product.description = description;
         if (category && category !== "null" && category !== "undefined" && category !== "") {
