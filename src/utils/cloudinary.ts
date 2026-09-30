@@ -1,5 +1,6 @@
 import "dotenv/config"
 import { v2 as cloudinary } from "cloudinary"
+import { addWatermarkToPdf, isPdfBuffer } from "./pdfWatermark"
 
 const getCloudinary = () => {
   cloudinary.config({
@@ -10,7 +11,22 @@ const getCloudinary = () => {
   return cloudinary
 }
 
-export const uploadToCloudinary = (fileBuffer: Buffer, folder: string = "ignoupower"): Promise<string> => {
+export const uploadToCloudinary = async (
+  fileBuffer: Buffer, 
+  folder: string = "ignoupower",
+  watermarkText: string = "IGNOU-POWER"
+): Promise<string> => {
+  let finalBuffer = fileBuffer
+
+  // Automatically apply watermark if the uploaded file is a PDF
+  if (isPdfBuffer(fileBuffer)) {
+    try {
+      finalBuffer = await addWatermarkToPdf(fileBuffer, watermarkText)
+    } catch (err) {
+      console.warn("Watermarking failed, uploading original PDF:", err)
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const cloud = getCloudinary()
     const uploadStream = cloud.uploader.upload_stream(
@@ -29,6 +45,6 @@ export const uploadToCloudinary = (fileBuffer: Buffer, folder: string = "ignoupo
         return reject(new Error("Cloudinary upload failed"));
       }
     );
-    uploadStream.end(fileBuffer);
+    uploadStream.end(finalBuffer);
   });
 };
